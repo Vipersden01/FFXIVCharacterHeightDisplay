@@ -26,7 +26,6 @@ public sealed unsafe class HeightOverlay : IDisposable {
 
     private readonly Configuration config;
     private readonly IFontHandle axisFont;
-    private readonly HashSet<string> partyNamesDrawn = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, HeightMemory> heights = new(StringComparer.OrdinalIgnoreCase);
     private IDtrBarEntry? ownHeightEntry;
     private string ownLabel = string.Empty;
@@ -66,7 +65,6 @@ public sealed unsafe class HeightOverlay : IDisposable {
             return;
         }
 
-        partyNamesDrawn.Clear();
         if (config.ShowParty)
             DrawParty(font);
 
@@ -111,11 +109,6 @@ public sealed unsafe class HeightOverlay : IDisposable {
         var label = LabelForRow(rowName, partyIndex, out var loaded, out var actorName, out var centimeters);
         if (label == null) return;
         if (loaded && config.ShowOwnOnWorldBar && IsLocalPlayer(actorName)) return;
-        if (loaded) {
-            partyNamesDrawn.Add(PlainName(rowName));
-            if (!string.IsNullOrWhiteSpace(actorName))
-                partyNamesDrawn.Add(actorName);
-        }
 
         var fill = ToColor(nameNode->TextColor);
         var edge = ToEdge(nameNode->EdgeColor);
@@ -125,7 +118,7 @@ public sealed unsafe class HeightOverlay : IDisposable {
         }
 
         var flash = loaded ? NoteHeight(actorName, centimeters) : default;
-        DrawBeside(font, label, (AtkResNode*)nameNode, rootBounds.Pos1.X, rootBounds.Pos2.X, drawLeft, fill, edge, besideNode: false, flash: flash);
+        DrawBeside(font, label, nameNode, rootBounds.Pos1.X, rootBounds.Pos2.X, drawLeft, fill, edge, besideNode: false, flash: flash);
     }
 
     private void DrawTarget(ImFontPtr font) {
@@ -134,7 +127,6 @@ public sealed unsafe class HeightOverlay : IDisposable {
 
         var targetName = target.Name.ToString() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(PlainName(targetName))) return;
-        if (partyNamesDrawn.Contains(PlainName(targetName))) return;
 
         if (!TryLabel(target, out var label, out var centimeters)) return;
         var flash = NoteHeight(PlainName(targetName), centimeters);
@@ -146,21 +138,30 @@ public sealed unsafe class HeightOverlay : IDisposable {
             var nameNode = FindText(addon->RootNode, targetName);
             if (nameNode == null) continue;
 
-            Bounds rootBounds;
-            addon->GetRootBounds(&rootBounds);
-            var pastTag = CompanyTagOverhang(addon->RootNode, nameNode, ReadCompanyTag(target));
-            DrawBeside(
-                font,
-                label,
-                (AtkResNode*)nameNode,
-                rootBounds.Pos1.X,
-                rootBounds.Pos2.X,
-                drawLeft: true,
-                ToColor(nameNode->TextColor),
-                ToEdge(nameNode->EdgeColor),
-                besideNode: true,
-                extendRight: pastTag,
-                flash: flash);
+            Bounds nameBounds;
+            ((AtkResNode*)nameNode)->GetBounds(&nameBounds);
+            var bar = FindHpBar(addon->RootNode, nameBounds);
+            if (bar != null) {
+                DrawAboveBar(font, label, nameNode, bar, ToColor(nameNode->TextColor), ToEdge(nameNode->EdgeColor), flash);
+            } else {
+                Bounds rootBounds;
+                addon->GetRootBounds(&rootBounds);
+                var pastTag = CompanyTagOverhang(addon->RootNode, nameNode, ReadCompanyTag(target));
+                DrawBeside(
+                    font,
+                    label,
+                    nameNode,
+                    rootBounds.Pos1.X,
+                    rootBounds.Pos2.X,
+                    drawLeft: true,
+                    ToColor(nameNode->TextColor),
+                    ToEdge(nameNode->EdgeColor),
+                    besideNode: true,
+                    extendRight: pastTag,
+                    flash: flash,
+                    raise: true);
+            }
+
             return;
         }
     }
@@ -251,7 +252,7 @@ public sealed unsafe class HeightOverlay : IDisposable {
 
         var bounds = ownHeightEntry.ScreenBounds;
         var box = bounds.Max - bounds.Min;
-        var idlePx = box.Y >= 8f ? Math.Clamp(box.Y * 0.92f, 12f, 28f) : 16f;
+        var idlePx = (box.Y >= 8f ? Math.Clamp(box.Y * 0.92f, 12f, 28f) : 16f) * TextScale;
         var idleSize = Measure(font, idlePx, ownLabel);
         var reserve = config.FlashChanges ? idlePx * 0.55f : 0f;
         ownHeightEntry.MinimumWidth = (ushort)Math.Clamp((int)MathF.Ceiling(idleSize.X + reserve), 1, 400);
@@ -261,15 +262,16 @@ public sealed unsafe class HeightOverlay : IDisposable {
         var handoff = ownFlash.Fade < 0.4f;
         ownHeightEntry.Text = handoff ? ownLabel : new string(' ', Math.Max(ownLabel.Length, 1));
         var presence = handoff ? ownFlash.Fade / 0.4f : 1f;
-        var fontPx = idlePx * (1f + 0.06f * ownFlash.Fade);
-        var textSize = Measure(font, fontPx, ownLabel);
-        var pos = new Vector2(bounds.Min.X, bounds.Min.Y + (box.Y - textSize.Y) * 0.5f);
+        var pop = 1f + 0.06f * ownFlash.Fade;
+        var textSize = Measure(font, idlePx * pop, ownLabel);
+        var restingPos = new Vector2(bounds.Min.X, bounds.Min.Y + (box.Y - idleSize.Y) * 0.5f);
+        var pos = restingPos + idleSize * 0.5f - textSize * 0.5f;
         var color = FlashColor(ownFlash.Direction);
         var fill = WithAlpha(LerpColor(ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, 1f)), color, ownFlash.Fade), presence);
         var edge = WithAlpha(ImGui.ColorConvertFloat4ToU32(new Vector4(0f, 0f, 0f, 1f)), presence);
-        DrawGlow(font, fontPx, pos, textSize, ownLabel, color, ownFlash.Fade * presence);
-        DrawOutlined(font, fontPx, pos, MathF.Max(1f, MathF.Round(fontPx / 16f)), fill, edge, ownLabel);
-        DrawChangeArrow(pos, textSize, fontPx, false, ownFlash.Direction, color, ownFlash.Fade * presence);
+        DrawGlow(font, idlePx * pop, pos, textSize, ownLabel, color, ownFlash.Fade * presence);
+        DrawOutlined(font, idlePx * pop, pos, MathF.Max(1f, MathF.Round(idlePx * pop / 16f)), fill, edge, ownLabel);
+        DrawChangeArrow(pos, textSize, idlePx * pop, false, ownFlash.Direction, color, ownFlash.Fade * presence);
     }
 
     private IDtrBarEntry EnsureOwnHeightEntry(string text) {
@@ -471,10 +473,10 @@ public sealed unsafe class HeightOverlay : IDisposable {
         return name[(digits + 1)..].Trim();
     }
 
-    private static void DrawBeside(
+    private void DrawBeside(
         ImFontPtr font,
         string text,
-        AtkResNode* anchor,
+        AtkTextNode* style,
         int frameLeft,
         int frameRight,
         bool drawLeft,
@@ -482,39 +484,106 @@ public sealed unsafe class HeightOverlay : IDisposable {
         uint edge,
         bool besideNode,
         float extendRight = 0f,
-        ActiveFlash flash = default) {
-        if (anchor == null || string.IsNullOrEmpty(text)) return;
+        ActiveFlash flash = default,
+        bool raise = false) {
+        if (style == null || string.IsNullOrEmpty(text)) return;
 
+        var anchor = (AtkResNode*)style;
         Bounds anchorBounds;
         anchor->GetBounds(&anchorBounds);
-        var fontPx = FontPixels(anchor, anchorBounds);
-        if (flash.Active)
-            fontPx *= 1f + 0.12f * flash.Fade;
-        var textSize = Measure(font, fontPx, text);
-        var thickness = MathF.Max(1f, MathF.Round(fontPx / 16f));
-        var pad = 6f * MathF.Max(1f, fontPx / 16f);
-        var y = anchorBounds.Pos1.Y + (anchorBounds.Height - textSize.Y) * 0.5f;
+        var restingPx = FontPixels(anchor, anchorBounds) * TextScale;
+        var restingSize = Measure(font, restingPx, text);
+        var pad = 6f * MathF.Max(1f, restingPx / 16f);
+        var y = anchorBounds.Pos1.Y + (anchorBounds.Height - restingSize.Y) * 0.5f;
+        if (!besideNode || raise)
+            y -= MathF.Max(3f, restingPx * 0.28f);
 
         float x;
         if (besideNode) {
             x = anchorBounds.Pos1.X + DrawnNameWidth(anchor, anchorBounds) + MathF.Max(0f, extendRight) + pad;
         } else if (drawLeft) {
-            x = frameLeft - textSize.X - pad;
+            x = frameLeft - restingSize.X - pad;
         } else {
             x = frameRight + pad;
         }
 
-        var pos = new Vector2(x, y);
-        if (flash.Active) {
-            var flashColor = FlashColor(flash.Direction);
-            DrawGlow(font, fontPx, pos, textSize, text, flashColor, flash.Fade);
-            fill = LerpColor(fill, flashColor, flash.Fade);
+        DrawScaled(font, text, new Vector2(x, y), restingPx, restingSize, fill, edge, flash, !besideNode && drawLeft);
+    }
+
+    private void DrawAboveBar(ImFontPtr font, string text, AtkTextNode* nameNode, AtkResNode* bar, uint fill, uint edge, ActiveFlash flash) {
+        Bounds nameBounds;
+        ((AtkResNode*)nameNode)->GetBounds(&nameBounds);
+        Bounds barBounds;
+        bar->GetBounds(&barBounds);
+        var restingPx = FontPixels((AtkResNode*)nameNode, nameBounds) * TextScale;
+        var restingSize = Measure(font, restingPx, text);
+        var gap = MathF.Max(2f, restingPx * 0.2f);
+        var x = barBounds.Pos2.X - restingSize.X;
+        var y = barBounds.Pos1.Y - gap - restingSize.Y;
+        DrawScaled(font, text, new Vector2(x, y), restingPx, restingSize, fill, edge, flash, false);
+    }
+
+    private float TextScale => Math.Clamp(config.TextScale <= 0f ? 1f : config.TextScale, 0.75f, 2f);
+
+    private static void DrawScaled(ImFontPtr font, string text, Vector2 restingPos, float restingPx, Vector2 restingSize, uint fill, uint edge, ActiveFlash flash, bool arrowOnLeft) {
+        var pop = flash.Active ? 1f + 0.12f * flash.Fade : 1f;
+        var fontPx = restingPx * pop;
+        var textSize = pop <= 1.001f ? restingSize : Measure(font, fontPx, text);
+        var pos = restingPos + restingSize * 0.5f - textSize * 0.5f;
+        var thickness = MathF.Max(1f, MathF.Round(fontPx / 16f));
+        if (!flash.Active) {
             DrawOutlined(font, fontPx, pos, thickness, fill, edge, text);
-            DrawChangeArrow(pos, textSize, fontPx, !besideNode && drawLeft, flash.Direction, flashColor, flash.Fade);
             return;
         }
 
+        var flashColor = FlashColor(flash.Direction);
+        DrawGlow(font, fontPx, pos, textSize, text, flashColor, flash.Fade);
+        fill = LerpColor(fill, flashColor, flash.Fade);
         DrawOutlined(font, fontPx, pos, thickness, fill, edge, text);
+        DrawChangeArrow(pos, textSize, fontPx, arrowOnLeft, flash.Direction, flashColor, flash.Fade);
+    }
+
+    private static AtkResNode* FindHpBar(AtkResNode* root, Bounds nameBounds) {
+        AtkResNode* best = null;
+        var bestScore = float.NegativeInfinity;
+        VisitBar(root, nameBounds, ref best, ref bestScore);
+        return best;
+    }
+
+    private static void VisitBar(AtkResNode* node, Bounds nameBounds, ref AtkResNode* best, ref float bestScore) {
+        if (node == null || !node->IsVisible()) return;
+
+        var type = node->GetNodeType();
+        if (type != NodeType.Text) {
+            Bounds bounds;
+            node->GetBounds(&bounds);
+            var width = (float)bounds.Width;
+            var height = (float)bounds.Height;
+            var belowName = bounds.Pos1.Y >= nameBounds.Pos1.Y - 4f;
+            var close = bounds.Pos1.Y <= nameBounds.Pos2.Y + MathF.Max(nameBounds.Height, 8f) * 2.5f;
+            var overlap = MathF.Min(bounds.Pos2.X, nameBounds.Pos2.X + 480f) - MathF.Max(bounds.Pos1.X, nameBounds.Pos1.X - 120f);
+            if (belowName && close && overlap >= 40f && width >= 100f && height is >= 6f and <= 36f && width >= height * 6f) {
+                var gap = MathF.Abs(bounds.Pos1.Y - nameBounds.Pos2.Y);
+                var score = width - gap * 4f;
+                if (score > bestScore) {
+                    best = node;
+                    bestScore = score;
+                }
+            }
+        }
+
+        if (type == NodeType.Component) {
+            var component = node->GetComponent();
+            if (component != null && component->UldManager.NodeList != null) {
+                var list = component->UldManager.NodeList;
+                var count = component->UldManager.NodeListCount;
+                for (var i = 0; i < count; i++)
+                    VisitBar(list[i], nameBounds, ref best, ref bestScore);
+            }
+        }
+
+        for (var child = node->ChildNode; child != null; child = child->PrevSiblingNode)
+            VisitBar(child, nameBounds, ref best, ref bestScore);
     }
 
     private static float DrawnNameWidth(AtkResNode* anchor, Bounds screenBounds) {

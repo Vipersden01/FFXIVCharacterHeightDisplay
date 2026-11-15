@@ -19,6 +19,11 @@ public sealed class Configuration : IPluginConfiguration {
 
     public HeightUnit Unit { get; set; } = HeightUnit.Centimeters;
     public int Decimals { get; set; } = 1;
+
+    /// <summary>
+    /// Multiplier for height label size. 1 matches the name text.
+    /// </summary>
+    public float TextScale { get; set; } = 1f;
     public PartyLabelSide Side { get; set; } = PartyLabelSide.Auto;
     public bool ShowParty { get; set; } = true;
     public bool ShowTarget { get; set; } = true;

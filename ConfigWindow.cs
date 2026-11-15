@@ -32,6 +32,12 @@ public sealed class ConfigWindow : Window {
             changed = true;
         }
 
+        var textScale = config.TextScale <= 0f ? 1f : config.TextScale;
+        if (ImGui.SliderFloat("Text size", ref textScale, 0.75f, 2f, "%.2fx")) {
+            config.TextScale = textScale;
+            changed = true;
+        }
+
         var side = (int)config.Side;
         if (ImGui.Combo("Party list side", ref side, "Follow the list\0Always left\0Always right\0")) {
             config.Side = (PartyLabelSide)side;
