@@ -1,0 +1,26 @@
+[
+  {
+    "Author": "Viper",
+    "Name": "Height Display",
+    "InternalName": "CharacterHeight",
+    "AssemblyVersion": "1.0.0.0",
+    "Description": "Shows each loaded party member and your target's height beside the game UI. Height comes from the character creator ranges, then racial and custom scale.",
+    "ApplicableVersion": "any",
+    "RepoUrl": "https://github.com/Vipersden01/FFXIVCharacterHeightDisplay",
+    "Tags": [
+      "ui",
+      "party"
+    ],
+    "DalamudApiLevel": 15,
+    "LoadRequiredState": 0,
+    "LoadSync": false,
+    "CanUnloadAsync": false,
+    "LoadPriority": 0,
+    "Punchline": "Party and target height, drawn in the party list's own type.",
+    "AcceptsFeedback": true,
+    "DownloadLinkInstall": "https://github.com/Vipersden01/FFXIVCharacterHeightDisplay/releases/download/v1.0.0/CharacterHeight.zip",
+    "DownloadLinkUpdate": "https://github.com/Vipersden01/FFXIVCharacterHeightDisplay/releases/download/v1.0.0/CharacterHeight.zip",
+    "DownloadCount": 0,
+    "LastUpdate": 1794769104
+  }
+]
