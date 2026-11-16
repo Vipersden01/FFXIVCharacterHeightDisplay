@@ -6,6 +6,9 @@ public enum HeightUnit {
     Centimeters,
     Meters,
     FeetInches,
+    Millimeters,
+    Kilometers,
+    Miles,
 }
 
 public enum PartyLabelSide {
@@ -21,8 +24,7 @@ public sealed class Configuration : IPluginConfiguration {
     public int Decimals { get; set; } = 1;
 
     /// <summary>
-    /// When on, huge metric heights step up to km, Mm, Gm, and Tm, and huge feet become miles.
-    /// Heights 100 times smaller than the chosen unit step down as well.
+    /// When on, the unit choice is metric or imperial and the label steps at ordinary boundaries.
     /// </summary>
     public bool CondenseHugeSizes { get; set; }
 

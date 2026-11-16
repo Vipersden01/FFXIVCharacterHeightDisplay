@@ -44,11 +44,13 @@ public sealed unsafe class HeightOverlay : IDisposable {
     }
 
     public void Draw() {
-        if (Service.Objects.LocalPlayer == null) {
+        var player = Service.Objects.LocalPlayer;
+        if (player == null) {
             HideOwnHeightBar();
             return;
         }
 
+        HeightCalculator.TryMeasure((GameObject*)player.Address, config, out _);
         UpdateOwnHeightBar();
 
         if (!axisFont.Available
@@ -565,19 +567,20 @@ public sealed unsafe class HeightOverlay : IDisposable {
         var restingPx = FontPixels((AtkResNode*)nameNode, nameBounds) * TextScale;
         var restingSize = Measure(font, restingPx, text);
         var gap = MathF.Max(2f, restingPx * 0.2f);
-        var x = barBounds.Pos2.X - restingSize.X;
-        var y = barBounds.Pos1.Y - gap - restingSize.Y;
-        DrawScaled(font, text, new Vector2(x, y), restingPx, restingSize, fill, edge, flash, false);
+        var anchor = new Vector2(barBounds.Pos2.X, barBounds.Pos1.Y - gap);
+        DrawScaled(font, text, anchor, restingPx, restingSize, fill, edge, flash, false, pinBottomRight: true);
     }
 
     private float TextScale => Math.Clamp(config.TextScale <= 0f ? 1f : config.TextScale, 0.75f, 2f);
 
-    private static void DrawScaled(ImFontPtr font, string text, Vector2 restingPos, float restingPx, Vector2 restingSize, uint fill, uint edge, ActiveFlash flash, bool arrowOnLeft) {
+    private static void DrawScaled(ImFontPtr font, string text, Vector2 restingPos, float restingPx, Vector2 restingSize, uint fill, uint edge, ActiveFlash flash, bool arrowOnLeft, bool pinBottomRight = false) {
         var pop = flash.Active ? 1f + 0.12f * flash.Fade : 1f;
         var fontPx = restingPx * pop;
         var textSize = pop <= 1.001f ? restingSize : Measure(font, fontPx, text);
-        var pos = restingPos + restingSize * 0.5f - textSize * 0.5f;
         var thickness = MathF.Max(1f, MathF.Round(fontPx / 16f));
+        var pos = pinBottomRight
+            ? new Vector2(restingPos.X - textSize.X - thickness, restingPos.Y - textSize.Y - thickness)
+            : restingPos + restingSize * 0.5f - textSize * 0.5f;
         if (!flash.Active) {
             DrawOutlined(font, fontPx, pos, thickness, fill, edge, text);
             return;

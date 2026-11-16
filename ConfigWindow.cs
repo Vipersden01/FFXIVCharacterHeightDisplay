@@ -22,18 +22,30 @@ public sealed class ConfigWindow : Window {
     public override void Draw() {
         var changed = false;
 
-        var unit = (int)config.Unit;
-        if (ImGui.Combo("Unit", ref unit, "Centimeters\0Meters\0Feet / inches\0")) {
-            config.Unit = (HeightUnit)unit;
-            changed = true;
+        if (config.CondenseHugeSizes) {
+            var family = config.Unit is HeightUnit.FeetInches or HeightUnit.Miles ? 1 : 0;
+            if (ImGui.Combo("Unit", ref family, "Metric\0Imperial\0")) {
+                var imperial = family == 1;
+                var wasImperial = config.Unit is HeightUnit.FeetInches or HeightUnit.Miles;
+                if (imperial != wasImperial) {
+                    config.Unit = imperial ? HeightUnit.FeetInches : HeightUnit.Centimeters;
+                    changed = true;
+                }
+            }
+        } else {
+            var unit = UnitIndex(config.Unit);
+            if (ImGui.Combo("Unit", ref unit, "Millimeters\0Centimeters\0Meters\0Kilometers\0Feet / inches\0Miles\0")) {
+                config.Unit = UnitFromIndex(unit);
+                changed = true;
+            }
         }
 
         changed |= Checkbox("Auto unit conversion", config.CondenseHugeSizes, value => config.CondenseHugeSizes = value);
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Huge sizes become km, Mm, and miles. Tiny sizes become mm, μm, inches, and mils.");
+            ImGui.SetTooltip("Metric steps through mm, cm, m, and km. Imperial steps through inches, feet, and miles.");
 
         var decimals = config.Decimals;
-        if (ImGui.SliderInt("Decimals", ref decimals, 0, 2)) {
+        if (ImGui.SliderInt("Decimals", ref decimals, 0, 3)) {
             config.Decimals = decimals;
             changed = true;
         }
@@ -66,9 +78,33 @@ public sealed class ConfigWindow : Window {
         DrawLocalReadout();
 #endif
 
+        if (ImGui.CollapsingHeader("Changelog")) {
+            ImGui.TextWrapped("1.1.7: Up to 3 decimal places. Tiny custom scales still count. Child bodies are measured from an adult. Target height text sits on top of the HP bar. Auto conversion is metric or imperial, and fixed units include mm, cm, m, km, feet, and miles.");
+            ImGui.TextWrapped("1.1.6: Party heights stay up while a member is casting.");
+            ImGui.TextWrapped("1.1.5: Auto unit conversion, the updated config, and /displayheight.");
+        }
+
         if (changed)
             config.Save();
     }
+
+    private static int UnitIndex(HeightUnit unit) => unit switch {
+        HeightUnit.Millimeters => 0,
+        HeightUnit.Centimeters => 1,
+        HeightUnit.Meters => 2,
+        HeightUnit.Kilometers => 3,
+        HeightUnit.FeetInches => 4,
+        _ => 5,
+    };
+
+    private static HeightUnit UnitFromIndex(int index) => index switch {
+        0 => HeightUnit.Millimeters,
+        1 => HeightUnit.Centimeters,
+        2 => HeightUnit.Meters,
+        3 => HeightUnit.Kilometers,
+        4 => HeightUnit.FeetInches,
+        _ => HeightUnit.Miles,
+    };
 
     private static bool Checkbox(string label, bool value, Action<bool> set) {
         if (!ImGui.Checkbox(label, ref value)) return false;

@@ -16,8 +16,8 @@ Height of current character can also be displayed in the world info bar!
 
 ## Settings
 
-- Unit: centimeters, meters, or feet and inches. Decimals from 0 to 2.
-- Auto unit conversion: convert measurement units to larger ones when you get large (or small) enough! Small meters become mm, μm, and nm. Small centimeters become μm, nm, and pm. Small feet become inches, then mils.
+- Unit, when auto conversion is off: millimeters, centimeters, meters, kilometers, feet and inches, or miles. Decimals from 0 to 3.
+- Auto unit conversion: metric or imperial. Under 10 cm becomes mm, under 1 mm becomes µm, over 1000 cm becomes m, and over 1000 m becomes km. Feet become inches under 1 foot and miles at 1 mile.
 - Text size, from 0.75× to 2×.
 - Party list side: always left or always right.
 - Show party sizes and show target size.
