@@ -101,9 +101,17 @@ public static unsafe class HeightCalculator {
         var stature = creatorCm * racial;
         var gameUnits = character->ModelContainer.CalculateHeight();
         var shown = stature * custom;
+        var nameplate = character->Height;
         if (customize.BodyType == 1) {
-            RememberAdult(customize.Race, customize.Tribe, customize.Sex, stature, gameUnits, isLocal);
-        } else if (float.IsFinite(gameUnits) && gameUnits > 0.0001f
+            RememberAdult(customize.Race, customize.Tribe, customize.Sex, stature, gameUnits, nameplate, shown, isLocal);
+        } else if (customize.BodyType == 4
+            && TryAdultRuler(customize.Race, customize.Tribe, customize.Sex, out var youngRuler)
+            && youngRuler.Nameplate > 0.01f
+            && float.IsFinite(nameplate)
+            && nameplate > 0.01f) {
+            shown = youngRuler.ShownCentimeters * (nameplate / youngRuler.Nameplate);
+        } else if (customize.BodyType != 1
+            && float.IsFinite(gameUnits) && gameUnits > 0.0001f
             && TryAdultRuler(customize.Race, customize.Tribe, customize.Sex, out var ruler)) {
             shown = gameUnits * (ruler.Centimeters / ruler.GameUnits) * custom;
         }
@@ -180,16 +188,23 @@ public static unsafe class HeightCalculator {
     private struct StatureRuler {
         public float Centimeters;
         public float GameUnits;
+        public float Nameplate;
+        public float ShownCentimeters;
     }
 
     private static readonly Dictionary<BodyKey, StatureRuler> adultRulers = new();
     private static StatureRuler localAdult;
     private static bool hasLocalAdult;
 
-    private static void RememberAdult(byte race, byte tribe, byte sex, float statureCm, float gameUnits, bool isLocal) {
+    private static void RememberAdult(byte race, byte tribe, byte sex, float statureCm, float gameUnits, float nameplate, float shownCm, bool isLocal) {
         if (!float.IsFinite(statureCm) || statureCm <= 1f) return;
         if (!float.IsFinite(gameUnits) || gameUnits <= 0.01f) return;
-        var ruler = new StatureRuler { Centimeters = statureCm, GameUnits = gameUnits };
+        var ruler = new StatureRuler {
+            Centimeters = statureCm,
+            GameUnits = gameUnits,
+            ShownCentimeters = shownCm,
+            Nameplate = float.IsFinite(nameplate) && nameplate > 0.01f ? nameplate : 0f,
+        };
         adultRulers[new BodyKey(race, tribe, sex)] = ruler;
         if (!isLocal) return;
         localAdult = ruler;
