@@ -27,6 +27,7 @@ public sealed unsafe class HeightOverlay : IDisposable {
     private readonly Configuration config;
     private readonly IFontHandle axisFont;
     private readonly Dictionary<string, HeightMemory> heights = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<int, string> castRowNames = new();
     private IDtrBarEntry? ownHeightEntry;
     private string ownLabel = string.Empty;
     private ActiveFlash ownFlash;
@@ -87,20 +88,57 @@ public sealed unsafe class HeightOverlay : IDisposable {
 
         var members = addon->PartyMembers;
         var memberCount = Math.Clamp(addon->MemberCount, 0, members.Length);
-        for (var i = 0; i < memberCount; i++)
-            DrawPartyRow(font, members[i].Name, members[i].NameAndBarsContainer, rootBounds, drawLeft, i);
+        for (var i = 0; i < memberCount; i++) {
+            var member = members[i];
+            DrawPartyRow(
+                font,
+                member.Name,
+                member.NameAndBarsContainer,
+                (AtkResNode*)member.CastingProgressBar,
+                member.CastingActionName,
+                rootBounds,
+                drawLeft,
+                i,
+                trust: false);
+        }
 
         var trusts = addon->TrustMembers;
         var trustCount = Math.Clamp(addon->TrustCount, 0, trusts.Length);
-        for (var i = 0; i < trustCount; i++)
-            DrawPartyRow(font, trusts[i].Name, trusts[i].NameAndBarsContainer, rootBounds, drawLeft, null);
+        for (var i = 0; i < trustCount; i++) {
+            var trust = trusts[i];
+            DrawPartyRow(
+                font,
+                trust.Name,
+                trust.NameAndBarsContainer,
+                (AtkResNode*)trust.CastingProgressBar,
+                trust.CastingActionName,
+                rootBounds,
+                drawLeft,
+                partyIndex: null,
+                trust: true,
+                trustIndex: i);
+        }
+
+        PruneCastRowNames(memberCount, trustCount);
     }
 
-    private void DrawPartyRow(ImFontPtr font, AtkTextNode* nameNode, AtkResNode* rowNode, Bounds rootBounds, bool drawLeft, int? partyIndex) {
-        if (!IsRowVisible(nameNode, rowNode)) return;
+    private void DrawPartyRow(
+        ImFontPtr font,
+        AtkTextNode* nameNode,
+        AtkResNode* rowNode,
+        AtkResNode* castBar,
+        AtkTextNode* castName,
+        Bounds rootBounds,
+        bool drawLeft,
+        int? partyIndex,
+        bool trust,
+        int trustIndex = 0) {
+        if (!IsRowVisible(nameNode, rowNode, castBar, castName)) return;
+        if (nameNode == null) return;
 
-        var rowName = ReadText(nameNode);
-        if (string.IsNullOrWhiteSpace(rowName)) return;
+        var casting = IsCasting(castBar, castName);
+        var rowName = RowCharacterName(nameNode, castName, casting, trust ? trustIndex + 32 : partyIndex ?? 0);
+        if (string.IsNullOrWhiteSpace(rowName) && partyIndex == null) return;
 
         var label = LabelForRow(rowName, partyIndex, out var loaded, out var actorName, out var centimeters);
         if (label == null) return;
@@ -114,7 +152,19 @@ public sealed unsafe class HeightOverlay : IDisposable {
         }
 
         var flash = loaded ? NoteHeight(actorName, centimeters) : default;
-        DrawBeside(font, label, nameNode, rootBounds.Pos1.X, rootBounds.Pos2.X, drawLeft, fill, edge, besideNode: false, flash: flash);
+        var anchor = RowAnchor((AtkResNode*)nameNode, (AtkResNode*)castName, castBar);
+        DrawBeside(
+            font,
+            label,
+            nameNode,
+            rootBounds.Pos1.X,
+            rootBounds.Pos2.X,
+            drawLeft,
+            fill,
+            edge,
+            besideNode: false,
+            flash: flash,
+            anchorNode: anchor == (AtkResNode*)nameNode ? null : anchor);
     }
 
     private void DrawTarget(ImFontPtr font) {
@@ -481,13 +531,14 @@ public sealed unsafe class HeightOverlay : IDisposable {
         bool besideNode,
         float extendRight = 0f,
         ActiveFlash flash = default,
-        bool raise = false) {
-        if (style == null || string.IsNullOrEmpty(text)) return;
+        bool raise = false,
+        AtkResNode* anchorNode = null) {
+        var anchor = anchorNode != null ? anchorNode : (AtkResNode*)style;
+        if (anchor == null || style == null || string.IsNullOrEmpty(text)) return;
 
-        var anchor = (AtkResNode*)style;
         Bounds anchorBounds;
         anchor->GetBounds(&anchorBounds);
-        var restingPx = FontPixels(anchor, anchorBounds) * TextScale;
+        var restingPx = FontPixels((AtkResNode*)style, anchorBounds) * TextScale;
         var restingSize = Measure(font, restingPx, text);
         var pad = 6f * MathF.Max(1f, restingPx / 16f);
         var y = anchorBounds.Pos1.Y + (anchorBounds.Height - restingSize.Y) * 0.5f;
@@ -789,9 +840,63 @@ public sealed unsafe class HeightOverlay : IDisposable {
         return inner.Equals(fcTag, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsRowVisible(AtkTextNode* nameNode, AtkResNode* rowNode) {
-        if (nameNode == null || !nameNode->IsVisible()) return false;
-        return rowNode == null || rowNode->IsVisible();
+    private static bool IsRowVisible(AtkTextNode* nameNode, AtkResNode* rowNode, AtkResNode* castBar, AtkTextNode* castName) {
+        if (rowNode != null && !rowNode->IsVisible()) return false;
+        if (nameNode != null && nameNode->IsVisible()) return true;
+        return IsCasting(castBar, castName);
+    }
+
+    private static bool IsCasting(AtkResNode* castBar, AtkTextNode* castName) {
+        if (castBar != null && castBar->IsVisible()) return true;
+        return castName != null && castName->IsVisible();
+    }
+
+    private string RowCharacterName(AtkTextNode* nameNode, AtkTextNode* castName, bool casting, int slot) {
+        var written = ReadText(nameNode);
+        var spell = PlainName(ReadText(castName));
+        var writtenName = PlainName(written);
+        var nameVisible = nameNode != null && nameNode->IsVisible();
+        var usable = writtenName.Length > 0 && (nameVisible || !IsSpellText(writtenName, spell));
+        if (usable) {
+            castRowNames[slot] = written;
+            return written;
+        }
+
+        if (!casting) return string.Empty;
+        return castRowNames.TryGetValue(slot, out var saved) ? saved : string.Empty;
+    }
+
+    private void PruneCastRowNames(int partyCount, int trustCount) {
+        List<int>? stale = null;
+        foreach (var key in castRowNames.Keys) {
+            var live = key < 32 ? key < partyCount : key - 32 < trustCount;
+            if (!live) (stale ??= []).Add(key);
+        }
+
+        if (stale == null) return;
+        foreach (var key in stale)
+            castRowNames.Remove(key);
+    }
+
+    private static bool IsSpellText(string written, string spell) {
+        if (spell.Length == 0 || written.Length == 0) return false;
+        if (written.Equals(spell, StringComparison.OrdinalIgnoreCase)) return true;
+        if (written.Length >= 3 && spell.StartsWith(written, StringComparison.OrdinalIgnoreCase)) return true;
+        return spell.Length >= 3 && written.StartsWith(spell, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static AtkResNode* RowAnchor(AtkResNode* nameNode, AtkResNode* castName, AtkResNode* castBar) {
+        if (HasUsableBounds(nameNode)) return nameNode;
+        if (HasUsableBounds(castName)) return castName;
+        if (HasUsableBounds(castBar)) return castBar;
+        return nameNode;
+    }
+
+    private static bool HasUsableBounds(AtkResNode* node) {
+        if (node == null) return false;
+        Bounds bounds;
+        node->GetBounds(&bounds);
+        return bounds.Width > 1 && bounds.Height > 1;
     }
 
     private static string ReadText(AtkTextNode* node) {
