@@ -21,12 +21,48 @@ public static unsafe class HeightCalculator {
         [FieldOffset(0x2A4)] public float ModelScale;
     }
 
-    public static string Format(float centimeters, HeightUnit unit, int decimals) {
-        return unit switch {
-            HeightUnit.Meters => FormatNumber(centimeters / 100f, decimals) + " m",
-            HeightUnit.FeetInches => FormatFeet(centimeters, decimals),
-            _ => FormatNumber(centimeters, decimals) + " cm",
-        };
+    public static string Format(float centimeters, HeightUnit unit, int decimals, bool condenseHuge) {
+        if (unit == HeightUnit.FeetInches)
+            return FormatFeet(centimeters, decimals, condenseHuge);
+        if (!condenseHuge)
+            return unit == HeightUnit.Meters
+                ? FormatNumber(centimeters / 100f, decimals) + " m"
+                : FormatNumber(centimeters, decimals) + " cm";
+
+        var meters = centimeters / 100f;
+        var absMeters = MathF.Abs(meters);
+        if (unit == HeightUnit.Centimeters)
+            return FormatCentimeters(centimeters, meters, absMeters, decimals);
+
+        if (absMeters >= 1_000f)
+            return FormatLargeMeters(meters, absMeters, decimals);
+        if (absMeters == 0f || absMeters >= 0.01f)
+            return FormatNumber(meters, decimals) + " m";
+        if (absMeters >= 1e-5f)
+            return FormatNumber(meters * 1e3f, decimals) + " mm";
+        if (absMeters >= 1e-8f)
+            return FormatNumber(meters * 1e6f, decimals) + " μm";
+        return FormatNumber(meters * 1e9f, decimals) + " nm";
+    }
+
+    private static string FormatCentimeters(float centimeters, float meters, float absMeters, int decimals) {
+        var absCentimeters = MathF.Abs(centimeters);
+        if (absCentimeters >= 100_000f)
+            return FormatLargeMeters(meters, absMeters, decimals);
+        if (absCentimeters == 0f || absCentimeters >= 0.01f)
+            return FormatNumber(centimeters, decimals) + " cm";
+        if (absCentimeters >= 1e-5f)
+            return FormatNumber(centimeters * 1e4f, decimals) + " μm";
+        if (absCentimeters >= 1e-8f)
+            return FormatNumber(centimeters * 1e7f, decimals) + " nm";
+        return FormatNumber(centimeters * 1e10f, decimals) + " pm";
+    }
+
+    private static string FormatLargeMeters(float meters, float absMeters, int decimals) {
+        if (absMeters >= 1e12f) return FormatNumber(meters / 1e12f, decimals) + " Tm";
+        if (absMeters >= 1e9f) return FormatNumber(meters / 1e9f, decimals) + " Gm";
+        if (absMeters >= 1e6f) return FormatNumber(meters / 1e6f, decimals) + " Mm";
+        return FormatNumber(meters / 1e3f, decimals) + " km";
     }
 
     public static string FormatNumber(float value, int decimals) {
@@ -39,8 +75,18 @@ public static unsafe class HeightCalculator {
         return value.ToString(format, CultureInfo.InvariantCulture);
     }
 
-    public static string FormatFeet(float centimeters, int decimals) {
+    public static string FormatFeet(float centimeters, int decimals, bool condenseHuge = false) {
         var totalInches = centimeters / 2.54f;
+        if (condenseHuge && totalInches != 0f) {
+            var absInches = MathF.Abs(totalInches);
+            if (absInches >= 5280f * 12f)
+                return FormatNumber(totalInches / (5280f * 12f), decimals) + " mi";
+            if (absInches < 0.12f)
+                return absInches < 0.01f
+                    ? FormatNumber(totalInches / 0.001f, decimals) + " mil"
+                    : FormatNumber(totalInches, decimals) + " in";
+        }
+
         var feet = (int)MathF.Floor(totalInches / 12f);
         var inches = totalInches - feet * 12f;
         if (decimals <= 0) {
@@ -69,7 +115,7 @@ public static unsafe class HeightCalculator {
         var local = Service.Objects.LocalPlayer;
         var isLocal = local != null && local.Address == (nint)gameObject;
         var racial = RacialFactor(modelScale, VanillaSkeletonScale(customize.Race, customize.Tribe, customize.Sex, customize.Height), isLocal);
-        var shown = creatorCm * racial * CustomExtra(customScale, config.ApplyCustomScale);
+        var shown = creatorCm * racial * CustomExtra(customScale);
         sample = new HeightSample(creatorCm, modelScale, racial, customScale, shown, character->ModelContainer.CalculateHeight());
         return true;
     }
@@ -131,8 +177,8 @@ public static unsafe class HeightCalculator {
         return ratio;
     }
 
-    private static float CustomExtra(float scale, bool apply) {
-        if (!apply || !float.IsFinite(scale) || scale <= 0.0001f) return 1f;
+    private static float CustomExtra(float scale) {
+        if (!float.IsFinite(scale) || scale <= 0.0001f) return 1f;
         if (MathF.Abs(scale - 1f) <= 0.001f) return 1f;
         return scale;
     }

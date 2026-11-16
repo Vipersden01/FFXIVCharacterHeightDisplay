@@ -83,11 +83,7 @@ public sealed unsafe class HeightOverlay : IDisposable {
         addon->GetRootBounds(&rootBounds);
         if (rootBounds.Width <= 0 || rootBounds.Height <= 0) return;
 
-        var drawLeft = config.Side switch {
-            PartyLabelSide.Left => true,
-            PartyLabelSide.Right => false,
-            _ => rootBounds.CenterX > ImGui.GetIO().DisplaySize.X * 0.5f,
-        };
+        var drawLeft = config.Side == PartyLabelSide.Left;
 
         var members = addon->PartyMembers;
         var memberCount = Math.Clamp(addon->MemberCount, 0, members.Length);
@@ -187,7 +183,7 @@ public sealed unsafe class HeightOverlay : IDisposable {
         if (actor.Address == nint.Zero) return false;
         if (!HeightCalculator.TryMeasure((GameObject*)actor.Address, config, out var sample)) return false;
         centimeters = sample.ShownCentimeters;
-        label = HeightCalculator.Format(centimeters, config.Unit, config.Decimals);
+        label = HeightCalculator.Format(centimeters, config.Unit, config.Decimals, config.CondenseHugeSizes);
         return true;
     }
 
@@ -203,8 +199,8 @@ public sealed unsafe class HeightOverlay : IDisposable {
         var step = memory.SampledAt > 0d ? (float)Math.Min(Math.Max(0d, now - memory.SampledAt), 0.1d) : 0f;
         memory.SampledAt = now;
         memory.SeenAt = now;
-        var previous = HeightCalculator.Format(memory.Centimeters, config.Unit, config.Decimals);
-        var next = HeightCalculator.Format(centimeters, config.Unit, config.Decimals);
+        var previous = HeightCalculator.Format(memory.Centimeters, config.Unit, config.Decimals, config.CondenseHugeSizes);
+        var next = HeightCalculator.Format(centimeters, config.Unit, config.Decimals, config.CondenseHugeSizes);
         if (!string.Equals(previous, next, StringComparison.Ordinal)) {
             var delta = centimeters - memory.Centimeters;
             if (delta != 0f) {

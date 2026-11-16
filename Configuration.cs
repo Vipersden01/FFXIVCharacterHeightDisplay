@@ -21,6 +21,12 @@ public sealed class Configuration : IPluginConfiguration {
     public int Decimals { get; set; } = 1;
 
     /// <summary>
+    /// When on, huge metric heights step up to km, Mm, Gm, and Tm, and huge feet become miles.
+    /// Heights 100 times smaller than the chosen unit step down as well.
+    /// </summary>
+    public bool CondenseHugeSizes { get; set; }
+
+    /// <summary>
     /// Multiplier for height label size. 1 matches the name text.
     /// </summary>
     public float TextScale { get; set; } = 1f;

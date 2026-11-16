@@ -1,9 +1,11 @@
 using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
-using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Interface.Windowing;
+#if DEBUG
+using Dalamud.Game.ClientState.Objects.Types;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
+#endif
 
 namespace CharacterHeight;
 
@@ -26,6 +28,10 @@ public sealed class ConfigWindow : Window {
             changed = true;
         }
 
+        changed |= Checkbox("Auto unit conversion", config.CondenseHugeSizes, value => config.CondenseHugeSizes = value);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Huge sizes become km, Mm, and miles. Tiny sizes become mm, μm, inches, and mils.");
+
         var decimals = config.Decimals;
         if (ImGui.SliderInt("Decimals", ref decimals, 0, 2)) {
             config.Decimals = decimals;
@@ -38,32 +44,27 @@ public sealed class ConfigWindow : Window {
             changed = true;
         }
 
-        var side = (int)config.Side;
-        if (ImGui.Combo("Party list side", ref side, "Follow the list\0Always left\0Always right\0")) {
-            config.Side = (PartyLabelSide)side;
+        var side = config.Side == PartyLabelSide.Left ? 0 : 1;
+        if (ImGui.Combo("Party list side", ref side, "Always left\0Always right\0")) {
+            config.Side = side == 0 ? PartyLabelSide.Left : PartyLabelSide.Right;
             changed = true;
         }
 
-        changed |= Checkbox("Show party", config.ShowParty, value => config.ShowParty = value);
-        changed |= Checkbox("Show target", config.ShowTarget, value => config.ShowTarget = value);
-        changed |= Checkbox("Flash height changes", config.FlashChanges, value => config.FlashChanges = value);
+        changed |= Checkbox("Show party sizes", config.ShowParty, value => config.ShowParty = value);
+        changed |= Checkbox("Show target size", config.ShowTarget, value => config.ShowTarget = value);
+        changed |= Checkbox("Flashy Height Text", config.FlashChanges, value => config.FlashChanges = value);
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("When a height goes up or down, the number juts out and glows green or red, then settles as the change slows.");
-        changed |= Checkbox("Your height on the world bar", config.ShowOwnOnWorldBar, value => config.ShowOwnOnWorldBar = value);
+            ImGui.SetTooltip("Special text effects when increasing / decreasing size");
+        changed |= Checkbox("World Bar Height Display", config.ShowOwnOnWorldBar, value => config.ShowOwnOnWorldBar = value);
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Shows your height on the server info bar and hides it on your party row. Move that bar to the top right in Dalamud's settings.");
+            ImGui.SetTooltip("Shows your height on the server info bar and hides it on your party row.");
         changed |= Checkbox("Hide in combat", config.HideInCombat, value => config.HideInCombat = value);
         changed |= Checkbox("Hide in cutscenes", config.HideInCutscene, value => config.HideInCutscene = value);
 
-        ImGui.Separator();
-        ImGui.TextDisabled("Racial scale mods apply as the change from the vanilla skeleton scale. An unmodded model scale is already in the creator height.");
-
-        changed |= Checkbox("Apply custom scale", config.ApplyCustomScale, value => config.ApplyCustomScale = value);
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("DrawObject scale Z. Special Snowflakes, SizeChange, and similar plugins write this.");
-
+#if DEBUG
         ImGui.Separator();
         DrawLocalReadout();
+#endif
 
         if (changed)
             config.Save();
@@ -75,6 +76,7 @@ public sealed class ConfigWindow : Window {
         return true;
     }
 
+#if DEBUG
     private unsafe void DrawLocalReadout() {
         ImGui.Text("Local character");
         var player = Service.Objects.LocalPlayer;
@@ -88,10 +90,11 @@ public sealed class ConfigWindow : Window {
             return;
         }
 
-        ImGui.Text($"Shown: {HeightCalculator.Format(sample.ShownCentimeters, config.Unit, config.Decimals)}");
+        ImGui.Text($"Shown: {HeightCalculator.Format(sample.ShownCentimeters, config.Unit, config.Decimals, config.CondenseHugeSizes)}");
         ImGui.Text($"Creator: {sample.CreatorCentimeters:0.0} cm");
         ImGui.Text($"Model scale: {sample.ModelScale:0.000}    Racial factor: {sample.RacialScale:0.000}    Custom scale: {sample.CustomScale:0.000}");
         ImGui.Text($"Game CalculateHeight: {sample.GameUnits:0.000}");
         ImGui.TextDisabled("CalculateHeight is the game's own float, not meters. Use it to check the scales above.");
     }
+#endif
 }

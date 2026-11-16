@@ -28,14 +28,14 @@ public sealed class Plugin : IDalamudPlugin {
         pluginInterface.UiBuilder.Draw += OnDraw;
         pluginInterface.UiBuilder.OpenConfigUi += ToggleConfig;
 
-        Service.Commands.AddHandler("/height", new CommandInfo(OnCommand) {
+        Service.Commands.AddHandler("/displayheight", new CommandInfo(OnCommand) {
             HelpMessage = "Open the Height Display config.",
             ShowInHelp = true,
         });
     }
 
     public void Dispose() {
-        Service.Commands.RemoveHandler("/height");
+        Service.Commands.RemoveHandler("/displayheight");
         Service.PluginInterface.UiBuilder.Draw -= OnDraw;
         Service.PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfig;
         windows.RemoveAllWindows();
