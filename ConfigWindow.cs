@@ -91,6 +91,7 @@ public sealed class ConfigWindow : Window {
 #endif
 
         if (ImGui.CollapsingHeader("Changelog")) {
+            ImGui.TextWrapped("1.1.8.3: Party heights follow the name on each row, so the leader's slot and a local reorder no longer swap them.");
             ImGui.TextWrapped("1.1.8.2: Party list height labels can be nudged, and a cutscene name no longer replaces that member's height.");
             ImGui.TextWrapped("1.1.7: Up to 3 decimal places. Tiny custom scales still count. Child bodies are measured from an adult. Target height text sits on top of the HP bar. Auto conversion is metric or imperial, and fixed units include mm, cm, m, km, feet, and miles.");
             ImGui.TextWrapped("1.1.6: Party heights stay up while a member is casting.");

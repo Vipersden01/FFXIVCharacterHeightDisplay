@@ -90,7 +90,10 @@ public sealed unsafe class HeightOverlay : IDisposable {
 
         var members = addon->PartyMembers;
         var memberCount = Math.Clamp(addon->MemberCount, 0, members.Length);
+        var partyNames = ResolvePartyNames(addon, memberCount);
         for (var i = 0; i < memberCount; i++) {
+            var partyName = partyNames[i];
+            if (string.IsNullOrWhiteSpace(partyName)) continue;
             var member = members[i];
             DrawPartyRow(
                 font,
@@ -100,14 +103,16 @@ public sealed unsafe class HeightOverlay : IDisposable {
                 member.CastingActionName,
                 rootBounds,
                 drawLeft,
-                i,
-                trust: false);
+                partyName,
+                partyRow: true);
         }
 
         var trusts = addon->TrustMembers;
         var trustCount = Math.Clamp(addon->TrustCount, 0, trusts.Length);
         for (var i = 0; i < trustCount; i++) {
             var trust = trusts[i];
+            var trustName = TrustRowName(trust.Name, trust.CastingActionName, i + 32);
+            if (string.IsNullOrWhiteSpace(trustName)) continue;
             DrawPartyRow(
                 font,
                 trust.Name,
@@ -116,9 +121,8 @@ public sealed unsafe class HeightOverlay : IDisposable {
                 trust.CastingActionName,
                 rootBounds,
                 drawLeft,
-                partyIndex: null,
-                trust: true,
-                trustIndex: i);
+                trustName,
+                partyRow: false);
         }
 
         PruneCastRowNames(memberCount, trustCount);
@@ -132,18 +136,12 @@ public sealed unsafe class HeightOverlay : IDisposable {
         AtkTextNode* castName,
         Bounds rootBounds,
         bool drawLeft,
-        int? partyIndex,
-        bool trust,
-        int trustIndex = 0) {
+        string rowName,
+        bool partyRow) {
         if (!IsRowVisible(nameNode, rowNode, castBar, castName)) return;
-        if (nameNode == null) return;
+        if (nameNode == null || string.IsNullOrWhiteSpace(rowName)) return;
 
-        var casting = IsCasting(castBar, castName);
-        var slot = trust ? trustIndex + 32 : partyIndex ?? 0;
-        var rowName = RowCharacterName(nameNode, castName, casting, slot, partyIndex, out var slotOnly);
-        if (string.IsNullOrWhiteSpace(rowName) && partyIndex == null) return;
-
-        var label = LabelForRow(rowName, partyIndex, slotOnly, out var loaded, out var actorName, out var centimeters);
+        var label = LabelForRow(rowName, partyRow, out var loaded, out var actorName, out var centimeters);
         if (label == null) return;
         if (loaded && config.ShowOwnOnWorldBar && IsLocalPlayer(actorName)) return;
 
@@ -215,11 +213,11 @@ public sealed unsafe class HeightOverlay : IDisposable {
         }
     }
 
-    private string? LabelForRow(string rowName, int? partyIndex, bool slotOnly, out bool loaded, out string actorName, out float centimeters) {
+    private string? LabelForRow(string rowName, bool partyRow, out bool loaded, out string actorName, out float centimeters) {
         loaded = false;
         actorName = string.Empty;
         centimeters = 0f;
-        if (!TryResolve(rowName, partyIndex, slotOnly, out var actor, out var unloadedPartyMember))
+        if (!TryResolve(rowName, partyRow, out var actor, out var unloadedPartyMember))
             return null;
         if (unloadedPartyMember || actor == null)
             return "—";
@@ -368,24 +366,12 @@ public sealed unsafe class HeightOverlay : IDisposable {
             heights.Remove(name);
     }
 
-    private static bool TryResolve(string rowName, int? partyIndex, bool slotOnly, out IGameObject? actor, out bool unloadedPartyMember) {
+    private static bool TryResolve(string rowName, bool partyRow, out IGameObject? actor, out bool unloadedPartyMember) {
         actor = null;
         unloadedPartyMember = false;
 
-        Dalamud.Game.ClientState.Party.IPartyMember? indexed = null;
-        if (partyIndex is int index && (uint)index < (uint)Service.PartyList.Length)
-            indexed = Service.PartyList[index];
-
-        if (slotOnly && indexed != null)
-            return ResolvePartyMember(indexed, out actor, out unloadedPartyMember);
-
         Dalamud.Game.ClientState.Party.IPartyMember? best = null;
         var bestScore = 0;
-        if (indexed != null)
-            bestScore = MatchScore(rowName, indexed.Name.ToString());
-        if (bestScore > 0)
-            best = indexed;
-
         foreach (var member in Service.PartyList) {
             if (member == null) continue;
             var score = MatchScore(rowName, member.Name.ToString());
@@ -397,11 +383,7 @@ public sealed unsafe class HeightOverlay : IDisposable {
         if (best != null)
             return ResolvePartyMember(best, out actor, out unloadedPartyMember);
 
-        // The party list draws slot i from PartyList[i]. A truncated or decorated
-        // name that matches nobody is still that slot.
-        if (indexed != null)
-            return ResolvePartyMember(indexed, out actor, out unloadedPartyMember);
-
+        if (partyRow) return false;
         actor = FindSpawned(rowName);
         return actor != null;
     }
@@ -863,33 +845,61 @@ public sealed unsafe class HeightOverlay : IDisposable {
         return castName != null && castName->IsVisible();
     }
 
-    private string RowCharacterName(AtkTextNode* nameNode, AtkTextNode* castName, bool casting, int slot, int? partyIndex, out bool slotOnly) {
-        slotOnly = false;
-        var written = ReadText(nameNode);
-        var spell = PlainName(ReadText(castName));
-        var writtenName = PlainName(written);
-        var nameVisible = nameNode != null && nameNode->IsVisible();
-        var usable = writtenName.Length > 0 && (nameVisible || !IsSpellText(writtenName, spell));
-        var candidate = usable ? written : string.Empty;
-        if (!usable && casting && castRowNames.TryGetValue(slot, out var castingName))
-            candidate = castingName;
+    private string?[] ResolvePartyNames(AddonPartyList* addon, int memberCount) {
+        var resolved = new string?[memberCount];
+        var members = addon->PartyMembers;
+        var claimed = new bool[Math.Max(Service.PartyList.Length, 0)];
 
-        if (partyIndex is int index && TryIndexedName(index, out var memberName)) {
-            if (MatchScore(candidate, memberName) > 0) {
-                castRowNames[slot] = candidate;
-                return candidate;
-            }
+        for (var i = 0; i < memberCount; i++) {
+            var member = members[i];
+            if (member.Name == null || !IsRowVisible(member.Name, member.NameAndBarsContainer, (AtkResNode*)member.CastingProgressBar, member.CastingActionName))
+                continue;
 
-            slotOnly = true;
-            if (castRowNames.TryGetValue(slot, out var remembered) && MatchScore(remembered, memberName) > 0)
-                return remembered;
-            return memberName;
+            var visible = VisibleRowName(member.Name, member.CastingActionName);
+            if (visible.Length == 0) continue;
+            if (!TryMatchPartyMember(visible, claimed, out var memberIndex, out var memberName)) continue;
+
+            resolved[i] = memberName;
+            claimed[memberIndex] = true;
+            castRowNames[i] = memberName;
         }
 
-        if (!string.IsNullOrWhiteSpace(candidate)) {
-            if (!castRowNames.TryGetValue(slot, out var remembered) || MatchScore(candidate, remembered) > 0) {
-                castRowNames[slot] = candidate;
-                return candidate;
+        List<int>? status = null;
+        for (var i = 0; i < memberCount; i++) {
+            if (resolved[i] != null) continue;
+            var member = members[i];
+            if (member.Name == null || !IsRowVisible(member.Name, member.NameAndBarsContainer, (AtkResNode*)member.CastingProgressBar, member.CastingActionName))
+                continue;
+            (status ??= []).Add(i);
+        }
+
+        if (status == null) return resolved;
+
+        if (status.Count == 1) {
+            var slot = status[0];
+            castRowNames.TryGetValue(slot, out var remembered);
+            if (TrySingleUnclaimed(claimed, remembered, out var memberName)) {
+                resolved[slot] = memberName;
+                castRowNames[slot] = memberName;
+            }
+        } else {
+            foreach (var slot in status) {
+                if (!castRowNames.TryGetValue(slot, out var remembered)) continue;
+                if (!TryMatchPartyMember(remembered, claimed, out var memberIndex, out var memberName)) continue;
+                resolved[slot] = memberName;
+                claimed[memberIndex] = true;
+            }
+        }
+
+        return resolved;
+    }
+
+    private string TrustRowName(AtkTextNode* nameNode, AtkTextNode* castName, int slot) {
+        var visible = VisibleRowName(nameNode, castName);
+        if (visible.Length > 0) {
+            if (!castRowNames.TryGetValue(slot, out var remembered) || MatchScore(visible, remembered) > 0) {
+                castRowNames[slot] = visible;
+                return visible;
             }
 
             return remembered;
@@ -898,13 +908,65 @@ public sealed unsafe class HeightOverlay : IDisposable {
         return castRowNames.TryGetValue(slot, out var saved) ? saved : string.Empty;
     }
 
-    private static bool TryIndexedName(int index, out string name) {
-        name = string.Empty;
-        if ((uint)index >= (uint)Service.PartyList.Length) return false;
-        var member = Service.PartyList[index];
-        if (member == null) return false;
-        name = member.Name.ToString() ?? string.Empty;
-        return !string.IsNullOrWhiteSpace(name);
+    private static string VisibleRowName(AtkTextNode* nameNode, AtkTextNode* castName) {
+        var written = ReadText(nameNode);
+        var writtenName = PlainName(written);
+        if (writtenName.Length == 0) return string.Empty;
+        if (IsSpellText(writtenName, PlainName(ReadText(castName)))) return string.Empty;
+        return written;
+    }
+
+    private static bool TryMatchPartyMember(string rowName, bool[] claimed, out int memberIndex, out string memberName) {
+        memberIndex = -1;
+        memberName = string.Empty;
+        var best = 0;
+        for (var i = 0; i < Service.PartyList.Length && i < claimed.Length; i++) {
+            if (claimed[i]) continue;
+            var member = Service.PartyList[i];
+            if (member == null) continue;
+            var name = member.Name.ToString() ?? string.Empty;
+            var score = MatchScore(rowName, name);
+            if (score <= best) continue;
+            best = score;
+            memberIndex = i;
+            memberName = name;
+        }
+
+        return memberIndex >= 0;
+    }
+
+    private static bool TrySingleUnclaimed(bool[] claimed, string? remembered, out string memberName) {
+        memberName = string.Empty;
+        var onlyName = string.Empty;
+        var count = 0;
+        var rememberedScore = 0;
+        var rememberedName = string.Empty;
+        for (var i = 0; i < Service.PartyList.Length && i < claimed.Length; i++) {
+            if (claimed[i]) continue;
+            var member = Service.PartyList[i];
+            if (member == null) continue;
+            var name = member.Name.ToString() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            count++;
+            onlyName = name;
+            if (string.IsNullOrWhiteSpace(remembered)) continue;
+            var score = MatchScore(remembered, name);
+            if (score <= rememberedScore) continue;
+            rememberedScore = score;
+            rememberedName = name;
+        }
+
+        if (count == 1) {
+            memberName = onlyName;
+            return true;
+        }
+
+        if (rememberedScore > 0) {
+            memberName = rememberedName;
+            return true;
+        }
+
+        return false;
     }
 
     private void PruneCastRowNames(int partyCount, int trustCount) {
