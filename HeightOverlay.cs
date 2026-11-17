@@ -139,10 +139,11 @@ public sealed unsafe class HeightOverlay : IDisposable {
         if (nameNode == null) return;
 
         var casting = IsCasting(castBar, castName);
-        var rowName = RowCharacterName(nameNode, castName, casting, trust ? trustIndex + 32 : partyIndex ?? 0);
+        var slot = trust ? trustIndex + 32 : partyIndex ?? 0;
+        var rowName = RowCharacterName(nameNode, castName, casting, slot, partyIndex, out var slotOnly);
         if (string.IsNullOrWhiteSpace(rowName) && partyIndex == null) return;
 
-        var label = LabelForRow(rowName, partyIndex, out var loaded, out var actorName, out var centimeters);
+        var label = LabelForRow(rowName, partyIndex, slotOnly, out var loaded, out var actorName, out var centimeters);
         if (label == null) return;
         if (loaded && config.ShowOwnOnWorldBar && IsLocalPlayer(actorName)) return;
 
@@ -214,11 +215,11 @@ public sealed unsafe class HeightOverlay : IDisposable {
         }
     }
 
-    private string? LabelForRow(string rowName, int? partyIndex, out bool loaded, out string actorName, out float centimeters) {
+    private string? LabelForRow(string rowName, int? partyIndex, bool slotOnly, out bool loaded, out string actorName, out float centimeters) {
         loaded = false;
         actorName = string.Empty;
         centimeters = 0f;
-        if (!TryResolve(rowName, partyIndex, out var actor, out var unloadedPartyMember))
+        if (!TryResolve(rowName, partyIndex, slotOnly, out var actor, out var unloadedPartyMember))
             return null;
         if (unloadedPartyMember || actor == null)
             return "—";
@@ -367,13 +368,16 @@ public sealed unsafe class HeightOverlay : IDisposable {
             heights.Remove(name);
     }
 
-    private static bool TryResolve(string rowName, int? partyIndex, out IGameObject? actor, out bool unloadedPartyMember) {
+    private static bool TryResolve(string rowName, int? partyIndex, bool slotOnly, out IGameObject? actor, out bool unloadedPartyMember) {
         actor = null;
         unloadedPartyMember = false;
 
         Dalamud.Game.ClientState.Party.IPartyMember? indexed = null;
         if (partyIndex is int index && (uint)index < (uint)Service.PartyList.Length)
             indexed = Service.PartyList[index];
+
+        if (slotOnly && indexed != null)
+            return ResolvePartyMember(indexed, out actor, out unloadedPartyMember);
 
         Dalamud.Game.ClientState.Party.IPartyMember? best = null;
         var bestScore = 0;
@@ -554,6 +558,11 @@ public sealed unsafe class HeightOverlay : IDisposable {
             x = frameLeft - restingSize.X - pad;
         } else {
             x = frameRight + pad;
+        }
+
+        if (!besideNode) {
+            x += config.PartyOffsetX;
+            y += config.PartyOffsetY;
         }
 
         DrawScaled(font, text, new Vector2(x, y), restingPx, restingSize, fill, edge, flash, !besideNode && drawLeft);
@@ -854,19 +863,48 @@ public sealed unsafe class HeightOverlay : IDisposable {
         return castName != null && castName->IsVisible();
     }
 
-    private string RowCharacterName(AtkTextNode* nameNode, AtkTextNode* castName, bool casting, int slot) {
+    private string RowCharacterName(AtkTextNode* nameNode, AtkTextNode* castName, bool casting, int slot, int? partyIndex, out bool slotOnly) {
+        slotOnly = false;
         var written = ReadText(nameNode);
         var spell = PlainName(ReadText(castName));
         var writtenName = PlainName(written);
         var nameVisible = nameNode != null && nameNode->IsVisible();
         var usable = writtenName.Length > 0 && (nameVisible || !IsSpellText(writtenName, spell));
-        if (usable) {
-            castRowNames[slot] = written;
-            return written;
+        var candidate = usable ? written : string.Empty;
+        if (!usable && casting && castRowNames.TryGetValue(slot, out var castingName))
+            candidate = castingName;
+
+        if (partyIndex is int index && TryIndexedName(index, out var memberName)) {
+            if (MatchScore(candidate, memberName) > 0) {
+                castRowNames[slot] = candidate;
+                return candidate;
+            }
+
+            slotOnly = true;
+            if (castRowNames.TryGetValue(slot, out var remembered) && MatchScore(remembered, memberName) > 0)
+                return remembered;
+            return memberName;
         }
 
-        if (!casting) return string.Empty;
+        if (!string.IsNullOrWhiteSpace(candidate)) {
+            if (!castRowNames.TryGetValue(slot, out var remembered) || MatchScore(candidate, remembered) > 0) {
+                castRowNames[slot] = candidate;
+                return candidate;
+            }
+
+            return remembered;
+        }
+
         return castRowNames.TryGetValue(slot, out var saved) ? saved : string.Empty;
+    }
+
+    private static bool TryIndexedName(int index, out string name) {
+        name = string.Empty;
+        if ((uint)index >= (uint)Service.PartyList.Length) return false;
+        var member = Service.PartyList[index];
+        if (member == null) return false;
+        name = member.Name.ToString() ?? string.Empty;
+        return !string.IsNullOrWhiteSpace(name);
     }
 
     private void PruneCastRowNames(int partyCount, int trustCount) {

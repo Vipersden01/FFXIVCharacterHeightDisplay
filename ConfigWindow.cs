@@ -62,6 +62,18 @@ public sealed class ConfigWindow : Window {
             changed = true;
         }
 
+        var partyOffsetX = config.PartyOffsetX;
+        if (ImGui.SliderFloat("Party offset X", ref partyOffsetX, -80f, 80f, "%.0f")) {
+            config.PartyOffsetX = partyOffsetX;
+            changed = true;
+        }
+
+        var partyOffsetY = config.PartyOffsetY;
+        if (ImGui.SliderFloat("Party offset Y", ref partyOffsetY, -80f, 80f, "%.0f")) {
+            config.PartyOffsetY = partyOffsetY;
+            changed = true;
+        }
+
         changed |= Checkbox("Show party sizes", config.ShowParty, value => config.ShowParty = value);
         changed |= Checkbox("Show target size", config.ShowTarget, value => config.ShowTarget = value);
         changed |= Checkbox("Flashy Height Text", config.FlashChanges, value => config.FlashChanges = value);
@@ -79,6 +91,7 @@ public sealed class ConfigWindow : Window {
 #endif
 
         if (ImGui.CollapsingHeader("Changelog")) {
+            ImGui.TextWrapped("1.1.8.2: Party list height labels can be nudged, and a cutscene name no longer replaces that member's height.");
             ImGui.TextWrapped("1.1.7: Up to 3 decimal places. Tiny custom scales still count. Child bodies are measured from an adult. Target height text sits on top of the HP bar. Auto conversion is metric or imperial, and fixed units include mm, cm, m, km, feet, and miles.");
             ImGui.TextWrapped("1.1.6: Party heights stay up while a member is casting.");
             ImGui.TextWrapped("1.1.5: Auto unit conversion, the updated config, and /displayheight.");

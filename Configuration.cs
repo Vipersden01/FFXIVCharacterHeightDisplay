@@ -33,6 +33,16 @@ public sealed class Configuration : IPluginConfiguration {
     /// </summary>
     public float TextScale { get; set; } = 1f;
     public PartyLabelSide Side { get; set; } = PartyLabelSide.Auto;
+
+    /// <summary>
+    /// Screen-pixel nudge for party-list height labels. Zero is the default place.
+    /// </summary>
+    public float PartyOffsetX { get; set; }
+
+    /// <summary>
+    /// Screen-pixel nudge for party-list height labels. Positive moves the label down.
+    /// </summary>
+    public float PartyOffsetY { get; set; }
     public bool ShowParty { get; set; } = true;
     public bool ShowTarget { get; set; } = true;
 
