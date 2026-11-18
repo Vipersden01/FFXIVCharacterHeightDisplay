@@ -9,5 +9,9 @@
   "Tags": [ "ui", "party" ],
   "DalamudApiLevel": 15,
   "LoadPriority": 0,
-  "Punchline": "See your size and others! Now in real time!"
+  "Punchline": "See your size and others! Now in real time!",
+  "IconUrl": "https://raw.githubusercontent.com/Vipersden01/FFXIVCharacterHeightDisplay/main/images/preview.png",
+  "ImageUrls": [
+    "https://raw.githubusercontent.com/Vipersden01/FFXIVCharacterHeightDisplay/main/images/preview.png"
+  ]
 }
