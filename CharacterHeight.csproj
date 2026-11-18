@@ -6,7 +6,7 @@
         <Author>Viper</Author>
         <Name>Height Display</Name>
         <Punchline>See your size and others! Now in real time!</Punchline>
-        <Description>Shows each loaded party member and your target's height beside the game UI. Height comes from the character creator ranges, then racial and custom scale.</Description>
+        <Description>Shows each loaded party member and your target's height beside the game UI. Height comes from the character creator ranges, then racial and custom scale. Open the config with /hdc or /heightdisplay.</Description>
         <ApplicableVersion>any</ApplicableVersion>
         <RepoUrl>https://github.com/Vipersden01/FFXIVCharacterHeightDisplay</RepoUrl>
     </PropertyGroup>
