@@ -10,7 +10,7 @@ Dalamud Settings -> Experimental -> Custom Plugin Repositories:
 
 https://raw.githubusercontent.com/Vipersden01/FFXIVCharacterHeightDisplay/main/pluginmaster.json
 
-Search for Height Display and install it. Open the config with `/displayheight`.
+Search for Height Display and install it. Open the config with `/hdc` or `/heightdisplay`.
 
 Height of current character can also be displayed in the world info bar!
 
@@ -20,6 +20,7 @@ Height of current character can also be displayed in the world info bar!
 - Auto unit conversion: metric or imperial. Under 10 cm becomes mm, under 1 mm becomes µm, over 1000 cm becomes m, and over 1000 m becomes km. Feet become inches under 1 foot and miles at 1 mile.
 - Text size, from 0.75× to 2×.
 - Party list side: always left or always right.
+- Party offset X and Party offset Y: nudge the party-list label from its default spot. Positive X moves right, positive Y moves down.
 - Show party sizes and show target size.
 - Flashy Height Text, glowing and animated numbers when changing size.
 - World Bar Height Display

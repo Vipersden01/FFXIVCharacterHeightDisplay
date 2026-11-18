@@ -188,27 +188,9 @@ public sealed unsafe class HeightOverlay : IDisposable {
             Bounds nameBounds;
             ((AtkResNode*)nameNode)->GetBounds(&nameBounds);
             var bar = FindHpBar(addon->RootNode, nameBounds);
-            if (bar != null) {
-                DrawAboveBar(font, label, nameNode, bar, ToColor(nameNode->TextColor), ToEdge(nameNode->EdgeColor), flash);
-            } else {
-                Bounds rootBounds;
-                addon->GetRootBounds(&rootBounds);
-                var pastTag = CompanyTagOverhang(addon->RootNode, nameNode, ReadCompanyTag(target));
-                DrawBeside(
-                    font,
-                    label,
-                    nameNode,
-                    rootBounds.Pos1.X,
-                    rootBounds.Pos2.X,
-                    drawLeft: true,
-                    ToColor(nameNode->TextColor),
-                    ToEdge(nameNode->EdgeColor),
-                    besideNode: true,
-                    extendRight: pastTag,
-                    flash: flash,
-                    raise: true);
-            }
+            if (bar == null) return;
 
+            DrawAboveBar(font, label, nameNode, bar, ToColor(nameNode->TextColor), ToEdge(nameNode->EdgeColor), flash, addonName);
             return;
         }
     }
@@ -314,6 +296,14 @@ public sealed unsafe class HeightOverlay : IDisposable {
         var restingPos = new Vector2(bounds.Min.X, bounds.Min.Y + (box.Y - idleSize.Y) * 0.5f);
         var pos = restingPos + idleSize * 0.5f - textSize * 0.5f;
         var color = FlashColor(ownFlash.Direction);
+        var thickness = MathF.Max(1f, MathF.Round(idlePx * pop / 16f));
+        var arrowHeight = MathF.Max(6f, idlePx * pop * 0.42f);
+        var arrowReach = arrowHeight * 0.85f + MathF.Max(2f, idlePx * pop * 0.14f);
+        if (GameWindowCovers(
+            new Vector2(pos.X - thickness, pos.Y - thickness),
+            new Vector2(pos.X + textSize.X + thickness + arrowReach, pos.Y + textSize.Y + thickness),
+            "_DTR"))
+            return;
         var fill = WithAlpha(LerpColor(ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, 1f)), color, ownFlash.Fade), presence);
         var edge = WithAlpha(ImGui.ColorConvertFloat4ToU32(new Vector4(0f, 0f, 0f, 1f)), presence);
         DrawGlow(font, idlePx * pop, pos, textSize, ownLabel, color, ownFlash.Fade * presence);
@@ -547,10 +537,10 @@ public sealed unsafe class HeightOverlay : IDisposable {
             y += config.PartyOffsetY;
         }
 
-        DrawScaled(font, text, new Vector2(x, y), restingPx, restingSize, fill, edge, flash, !besideNode && drawLeft);
+        DrawScaled(font, text, new Vector2(x, y), restingPx, restingSize, fill, edge, flash, !besideNode && drawLeft, hostAddon: "_PartyList");
     }
 
-    private void DrawAboveBar(ImFontPtr font, string text, AtkTextNode* nameNode, AtkResNode* bar, uint fill, uint edge, ActiveFlash flash) {
+    private void DrawAboveBar(ImFontPtr font, string text, AtkTextNode* nameNode, AtkResNode* bar, uint fill, uint edge, ActiveFlash flash, string hostAddon) {
         Bounds nameBounds;
         ((AtkResNode*)nameNode)->GetBounds(&nameBounds);
         Bounds barBounds;
@@ -559,12 +549,12 @@ public sealed unsafe class HeightOverlay : IDisposable {
         var restingSize = Measure(font, restingPx, text);
         var gap = MathF.Max(2f, restingPx * 0.2f);
         var anchor = new Vector2(barBounds.Pos2.X, barBounds.Pos1.Y - gap);
-        DrawScaled(font, text, anchor, restingPx, restingSize, fill, edge, flash, false, pinBottomRight: true);
+        DrawScaled(font, text, anchor, restingPx, restingSize, fill, edge, flash, false, pinBottomRight: true, hostAddon: hostAddon);
     }
 
     private float TextScale => Math.Clamp(config.TextScale <= 0f ? 1f : config.TextScale, 0.75f, 2f);
 
-    private static void DrawScaled(ImFontPtr font, string text, Vector2 restingPos, float restingPx, Vector2 restingSize, uint fill, uint edge, ActiveFlash flash, bool arrowOnLeft, bool pinBottomRight = false) {
+    private static void DrawScaled(ImFontPtr font, string text, Vector2 restingPos, float restingPx, Vector2 restingSize, uint fill, uint edge, ActiveFlash flash, bool arrowOnLeft, bool pinBottomRight = false, string? hostAddon = null) {
         var pop = flash.Active ? 1f + 0.12f * flash.Fade : 1f;
         var fontPx = restingPx * pop;
         var textSize = pop <= 1.001f ? restingSize : Measure(font, fontPx, text);
@@ -572,6 +562,15 @@ public sealed unsafe class HeightOverlay : IDisposable {
         var pos = pinBottomRight
             ? new Vector2(restingPos.X - textSize.X - thickness, restingPos.Y - textSize.Y - thickness)
             : restingPos + restingSize * 0.5f - textSize * 0.5f;
+        var arrowReach = 0f;
+        if (flash.Active) {
+            var arrowHeight = MathF.Max(6f, fontPx * 0.42f);
+            arrowReach = arrowHeight * 0.85f + MathF.Max(2f, fontPx * 0.14f);
+        }
+
+        var min = new Vector2(pos.X - thickness - (arrowOnLeft ? arrowReach : 0f), pos.Y - thickness);
+        var max = new Vector2(pos.X + textSize.X + thickness + (arrowOnLeft ? 0f : arrowReach), pos.Y + textSize.Y + thickness);
+        if (GameWindowCovers(min, max, hostAddon)) return;
         if (!flash.Active) {
             DrawOutlined(font, fontPx, pos, thickness, fill, edge, text);
             return;
@@ -661,8 +660,65 @@ public sealed unsafe class HeightOverlay : IDisposable {
         return Math.Clamp(fontSize * scale, 10f, 48f);
     }
 
+    private static bool GameWindowCovers(Vector2 min, Vector2 max, string? hostAddon) {
+        var stage = AtkStage.Instance();
+        if (stage == null) return false;
+        var manager = stage->RaptureAtkUnitManager;
+        if (manager == null) return false;
+
+        if (ListCovers(&manager->DepthLayerOneList, min, max, hostAddon, requireWindow: true)) return true;
+        if (ListCovers(&manager->DepthLayerTwoList, min, max, hostAddon, requireWindow: true)) return true;
+        if (ListCovers(&manager->DepthLayerThreeList, min, max, hostAddon, requireWindow: true)) return true;
+        if (ListCovers(&manager->DepthLayerFourList, min, max, hostAddon, requireWindow: true)) return true;
+        if (ListCovers(&manager->DepthLayerFiveList, min, max, hostAddon, requireWindow: true)) return true;
+        if (ListCovers(&manager->DepthLayerSixList, min, max, hostAddon, requireWindow: true)) return true;
+        if (ListCovers(&manager->DepthLayerSevenList, min, max, hostAddon, requireWindow: true)) return true;
+        if (ListCovers(&manager->DepthLayerEightList, min, max, hostAddon, requireWindow: true)) return true;
+        if (ListCovers(&manager->DepthLayerNineList, min, max, hostAddon, requireWindow: true)) return true;
+        if (ListCovers(&manager->DepthLayerTenList, min, max, hostAddon, requireWindow: true)) return true;
+        if (ListCovers(&manager->DepthLayerElevenList, min, max, hostAddon, requireWindow: true)) return true;
+        if (ListCovers(&manager->DepthLayerTwelveList, min, max, hostAddon, requireWindow: true)) return true;
+        if (ListCovers(&manager->DepthLayerThirteenList, min, max, hostAddon, requireWindow: true)) return true;
+        return ListCovers(&manager->FocusedUnitsList, min, max, hostAddon, requireWindow: false);
+    }
+
+    private static bool ListCovers(AtkUnitList* list, Vector2 min, Vector2 max, string? hostAddon, bool requireWindow) {
+        if (list == null) return false;
+        var count = list->Count;
+        var entries = list->Entries;
+        if (count > entries.Length) count = (ushort)entries.Length;
+        for (var i = 0; i < count; i++) {
+            var addon = entries[i].Value;
+            if (addon == null || !addon->IsVisible) continue;
+            if (requireWindow && addon->WindowNode == null) continue;
+
+            var name = addon->NameString;
+            if (!string.IsNullOrEmpty(hostAddon) && string.Equals(name, hostAddon, StringComparison.Ordinal))
+                continue;
+
+            Bounds bounds;
+            if (addon->WindowNode != null)
+                addon->GetWindowBounds(&bounds);
+            else
+                addon->GetRootBounds(&bounds);
+            if (bounds.Width <= 1 || bounds.Height <= 1) continue;
+
+            var screen = ImGui.GetIO().DisplaySize;
+            if (screen.X > 1f && screen.Y > 1f
+                && bounds.Width >= screen.X * 0.85f
+                && bounds.Height >= screen.Y * 0.85f)
+                continue;
+
+            if (bounds.Pos2.X <= min.X || bounds.Pos1.X >= max.X || bounds.Pos2.Y <= min.Y || bounds.Pos1.Y >= max.Y)
+                continue;
+            return true;
+        }
+
+        return false;
+    }
+
     private static void DrawOutlined(ImFontPtr font, float fontPx, Vector2 pos, float thickness, uint fill, uint edge, string text) {
-        var drawList = ImGui.GetForegroundDrawList();
+        var drawList = ImGui.GetBackgroundDrawList();
         ReadOnlySpan<Vector2> offsets = [
             new(-1f, 0f), new(1f, 0f), new(0f, -1f), new(0f, 1f),
             new(-1f, -1f), new(1f, -1f), new(-1f, 1f), new(1f, 1f),
@@ -677,7 +733,7 @@ public sealed unsafe class HeightOverlay : IDisposable {
     private static void DrawGlow(ImFontPtr font, float fontPx, Vector2 pos, Vector2 textSize, string text, uint color, float fade) {
         ReadOnlySpan<float> scales = [1.08f, 1.16f];
         ReadOnlySpan<float> alphas = [0.40f, 0.18f];
-        var drawList = ImGui.GetForegroundDrawList();
+        var drawList = ImGui.GetBackgroundDrawList();
         for (var i = 0; i < scales.Length; i++) {
             var glowPx = fontPx * scales[i];
             var glowSize = Measure(font, glowPx, text);
@@ -711,7 +767,7 @@ public sealed unsafe class HeightOverlay : IDisposable {
             baseRight = new Vector2(right, top);
         }
 
-        ImGui.GetForegroundDrawList().AddTriangleFilled(tip, baseLeft, baseRight, WithAlpha(color, fade));
+        ImGui.GetBackgroundDrawList().AddTriangleFilled(tip, baseLeft, baseRight, WithAlpha(color, fade));
     }
 
     private static uint FlashColor(int direction) {

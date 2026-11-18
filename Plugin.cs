@@ -28,14 +28,13 @@ public sealed class Plugin : IDalamudPlugin {
         pluginInterface.UiBuilder.Draw += OnDraw;
         pluginInterface.UiBuilder.OpenConfigUi += ToggleConfig;
 
-        Service.Commands.AddHandler("/displayheight", new CommandInfo(OnCommand) {
-            HelpMessage = "Open the Height Display config.",
-            ShowInHelp = true,
-        });
+        AddConfigCommand("/hdc");
+        AddConfigCommand("/heightdisplay");
     }
 
     public void Dispose() {
-        Service.Commands.RemoveHandler("/displayheight");
+        Service.Commands.RemoveHandler("/hdc");
+        Service.Commands.RemoveHandler("/heightdisplay");
         Service.PluginInterface.UiBuilder.Draw -= OnDraw;
         Service.PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfig;
         windows.RemoveAllWindows();
@@ -47,6 +46,13 @@ public sealed class Plugin : IDalamudPlugin {
         ApplyCutsceneVisibility();
         windows.Draw();
         overlay.Draw();
+    }
+
+    private void AddConfigCommand(string command) {
+        Service.Commands.AddHandler(command, new CommandInfo(OnCommand) {
+            HelpMessage = "Open the Height Display config.",
+            ShowInHelp = true,
+        });
     }
 
     private void OnCommand(string command, string args) => ToggleConfig();
