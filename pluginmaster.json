@@ -17,14 +17,14 @@
     "CanUnloadAsync": false,
     "LoadPriority": 0,
     "Punchline": "See your size and others! Now in real time!",
-    "IconUrl": "https://raw.githubusercontent.com/Vipersden01/FFXIVCharacterHeightDisplay/main/images/preview.png",
+    "IconUrl": "https://raw.githubusercontent.com/Vipersden01/FFXIVCharacterHeightDisplay/main/images/previewTN.png",
     "ImageUrls": [
-      "https://raw.githubusercontent.com/Vipersden01/FFXIVCharacterHeightDisplay/main/images/preview.png"
+      "https://raw.githubusercontent.com/Vipersden01/FFXIVCharacterHeightDisplay/main/images/previewTN.png"
     ],
     "AcceptsFeedback": true,
     "DownloadLinkInstall": "https://github.com/Vipersden01/FFXIVCharacterHeightDisplay/releases/download/v1.2/CharacterHeight.zip",
     "DownloadLinkUpdate": "https://github.com/Vipersden01/FFXIVCharacterHeightDisplay/releases/download/v1.2/CharacterHeight.zip",
     "DownloadCount": 0,
-    "LastUpdate": 1795038473
+    "LastUpdate": 1795040131
   }
 ]
