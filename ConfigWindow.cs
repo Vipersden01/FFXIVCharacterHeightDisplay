@@ -96,7 +96,7 @@ public sealed class ConfigWindow : Window {
 #endif
 
         if (ImGui.CollapsingHeader("Changelog"))
-            ImGui.TextWrapped("1.2: UI refresh, updated how UI draws on the screen to behave nicer with other elements and fixed a few small visual bugs. Release Prep.");
+            ImGui.TextWrapped("1.2.4: Young (child) bodies are now measured from their skeleton, fixed server bar offset, added heels toggle for displaying height with them, and fixed some edge cases where unset NPC's would use incorrect values.");
 
         if (changed)
             config.Save();
