@@ -449,6 +449,12 @@ public sealed unsafe class HeightOverlay : IDisposable {
         if (best != null)
             return ResolvePartyMember(best, out actor, out unloadedPartyMember);
 
+        var player = Service.Objects.LocalPlayer;
+        if (player != null && MatchScore(rowName, player.Name.ToString()) > 0) {
+            actor = player;
+            return true;
+        }
+
         if (partyRow) return false;
         actor = FindSpawned(rowName);
         return actor != null;
@@ -1010,7 +1016,7 @@ public sealed unsafe class HeightOverlay : IDisposable {
         if (status.Count == 1) {
             var slot = status[0];
             castRowNames.TryGetValue(slot, out var remembered);
-            if (TrySingleUnclaimed(claimed, remembered, out var memberName)) {
+            if (TrySingleUnclaimed(claimed, remembered, out var memberName) || TrySoloPlayer(out memberName)) {
                 resolved[slot] = memberName;
                 castRowNames[slot] = memberName;
             }
@@ -1099,6 +1105,19 @@ public sealed unsafe class HeightOverlay : IDisposable {
         }
 
         return false;
+    }
+
+    private static bool TrySoloPlayer(out string playerName) {
+        playerName = string.Empty;
+        for (var i = 0; i < Service.PartyList.Length; i++) {
+            var member = Service.PartyList[i];
+            if (member != null && !string.IsNullOrWhiteSpace(member.Name.ToString())) return false;
+        }
+
+        var player = Service.Objects.LocalPlayer;
+        if (player == null) return false;
+        playerName = player.Name.ToString() ?? string.Empty;
+        return !string.IsNullOrWhiteSpace(playerName);
     }
 
     private void PruneCastRowNames(int partyCount, int trustCount) {

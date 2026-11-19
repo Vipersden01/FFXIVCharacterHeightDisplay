@@ -201,6 +201,11 @@ public sealed class ConfigWindow : Window {
                 : "none";
         var young = youngMeasured ? $"{youngCm:0.00} cm" : "none";
 
+        var range = HeightTable.TryGetRange(body.Race, body.Tribe, body.Sex, out var minCm, out var maxCm)
+            ? $"{minCm:0.0}–{maxCm:0.0} cm"
+            : "none";
+        var liveScale = hasSkeleton ? $"{scale.Y:0.000}" : $"{sample.ModelScale:0.000}";
+        ImGui.Text($"Range: {range}    Slider: {HeightCalculator.EffectiveHeight(gameObject)}    Live scale: {liveScale}");
         ImGui.Text($"Creator: {sample.CreatorCentimeters:0.0} cm    Shown: {sample.ShownCentimeters:0.00} cm");
         ImGui.Text($"Model scale: {sample.ModelScale:0.000}    Racial factor: {sample.RacialScale:0.000}    Custom scale: {sample.CustomScale:0.000}");
         ImGui.Text($"Skeleton scale: {skeletonScale}");
