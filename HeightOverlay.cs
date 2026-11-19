@@ -22,6 +22,7 @@ public sealed unsafe class HeightOverlay : IDisposable {
     private const float JutSeconds = 0.15f;
     private const float RestSeconds = 1.05f;
     private const string OwnHeightTitle = "Character height";
+    private const float OwnFlashPop = 0.2f;
     private static readonly string[] TargetAddonNames = ["_TargetInfoMainTarget", "_TargetInfo"];
 
     private readonly Configuration config;
@@ -31,6 +32,7 @@ public sealed unsafe class HeightOverlay : IDisposable {
     private IDtrBarEntry? ownHeightEntry;
     private string ownLabel = string.Empty;
     private ActiveFlash ownFlash;
+    private float ownBarPx;
 
     public HeightOverlay(Configuration config, IFontHandle axisFont) {
         this.config = config;
@@ -281,19 +283,35 @@ public sealed unsafe class HeightOverlay : IDisposable {
 
         var bounds = ownHeightEntry.ScreenBounds;
         var box = bounds.Max - bounds.Min;
-        var idlePx = (box.Y >= 8f ? Math.Clamp(box.Y * 0.92f, 12f, 28f) : 16f) * TextScale;
+        // The server bar text ignores the label text size setting, so the stand-in follows the bar's own font.
+        Bounds nodeBounds = default;
+        var textNode = box.X >= 2f && box.Y >= 2f ? FindDtrTextNode(bounds.Min, bounds.Max, out nodeBounds) : null;
+        var guessPx = textNode != null
+            ? FontPixels((AtkResNode*)textNode, nodeBounds)
+            : box.Y >= 8f ? Math.Clamp(box.Y * 0.92f, 12f, 28f) : 16f;
+        // The game font draws wider than ours at the same size, so match the width the bar actually drew.
+        if (textNode != null && !ownFlash.Active) {
+            var guessWidth = Measure(font, guessPx, ownLabel).X;
+            var matched = guessWidth > 1f ? guessPx * DrawnNameWidth((AtkResNode*)textNode, nodeBounds) / guessWidth : 0f;
+            if (float.IsFinite(matched) && matched is >= 8f and <= 64f)
+                ownBarPx = matched;
+        }
+
+        var idlePx = ownBarPx > 0f ? ownBarPx : guessPx;
         var idleSize = Measure(font, idlePx, ownLabel);
-        var reserve = config.FlashChanges ? idlePx * 0.55f : 0f;
+        var reserve = config.FlashChanges ? idlePx * 0.6f + idleSize.X * OwnFlashPop * 0.5f : 0f;
         ownHeightEntry.MinimumWidth = (ushort)Math.Clamp((int)MathF.Ceiling(idleSize.X + reserve), 1, 400);
         if (!ownFlash.Active || box.X < 2f || box.Y < 2f) return;
 
-        // Keep the stand-in near the bar's own size, and let the plain text show through as the glow fades out.
+        // Let the plain text show through as the glow fades out.
         var handoff = ownFlash.Fade < 0.4f;
         ownHeightEntry.Text = handoff ? ownLabel : new string(' ', Math.Max(ownLabel.Length, 1));
         var presence = handoff ? ownFlash.Fade / 0.4f : 1f;
-        var pop = 1f + 0.06f * ownFlash.Fade;
+        var pop = 1f + OwnFlashPop * ownFlash.Fade;
         var textSize = Measure(font, idlePx * pop, ownLabel);
-        var restingPos = new Vector2(bounds.Min.X, bounds.Min.Y + (box.Y - idleSize.Y) * 0.5f);
+        var restingPos = new Vector2(
+            AlignedTextX(textNode, bounds.Min.X, bounds.Max.X, idleSize.X),
+            bounds.Min.Y + (box.Y - idleSize.Y) * 0.5f);
         var pos = restingPos + idleSize * 0.5f - textSize * 0.5f;
         var color = FlashColor(ownFlash.Direction);
         var thickness = MathF.Max(1f, MathF.Round(idlePx * pop / 16f));
@@ -309,6 +327,56 @@ public sealed unsafe class HeightOverlay : IDisposable {
         DrawGlow(font, idlePx * pop, pos, textSize, ownLabel, color, ownFlash.Fade * presence);
         DrawOutlined(font, idlePx * pop, pos, MathF.Max(1f, MathF.Round(idlePx * pop / 16f)), fill, edge, ownLabel);
         DrawChangeArrow(pos, textSize, idlePx * pop, false, ownFlash.Direction, color, ownFlash.Fade * presence);
+    }
+
+    private static AtkTextNode* FindDtrTextNode(Vector2 min, Vector2 max, out Bounds nodeBounds) {
+        nodeBounds = default;
+        var addon = Service.GameGui.GetAddonByName<AtkUnitBase>("_DTR");
+        if (addon == null || !addon->IsVisible || addon->RootNode == null) return null;
+
+        AtkTextNode* found = null;
+        var bestError = 2.5f;
+        VisitDtrText(addon->RootNode, min, max, ref found, ref nodeBounds, ref bestError);
+        return found;
+    }
+
+    private static void VisitDtrText(AtkResNode* node, Vector2 min, Vector2 max, ref AtkTextNode* found, ref Bounds foundBounds, ref float bestError) {
+        if (node == null || !node->IsVisible()) return;
+
+        if (node->GetNodeType() == NodeType.Text) {
+            Bounds bounds;
+            node->GetBounds(&bounds);
+            var error = MathF.Max(
+                MathF.Max(MathF.Abs(bounds.Pos1.X - min.X), MathF.Abs(bounds.Pos2.X - max.X)),
+                MathF.Max(MathF.Abs(bounds.Pos1.Y - min.Y), MathF.Abs(bounds.Pos2.Y - max.Y)));
+            if (error < bestError) {
+                found = node->GetAsAtkTextNode();
+                foundBounds = bounds;
+                bestError = error;
+            }
+        }
+
+        if (node->GetNodeType() == NodeType.Component) {
+            var component = node->GetComponent();
+            if (component != null && component->UldManager.NodeList != null) {
+                var list = component->UldManager.NodeList;
+                var count = component->UldManager.NodeListCount;
+                for (var i = 0; i < count; i++)
+                    VisitDtrText(list[i], min, max, ref found, ref foundBounds, ref bestError);
+            }
+        }
+
+        for (var child = node->ChildNode; child != null; child = child->PrevSiblingNode)
+            VisitDtrText(child, min, max, ref found, ref foundBounds, ref bestError);
+    }
+
+    private static float AlignedTextX(AtkTextNode* textNode, float left, float right, float width) {
+        if (textNode == null) return left;
+        return textNode->AlignmentType switch {
+            AlignmentType.Top or AlignmentType.Center or AlignmentType.Bottom => left + (right - left - width) * 0.5f,
+            AlignmentType.TopRight or AlignmentType.Right or AlignmentType.BottomRight => right - width,
+            _ => left,
+        };
     }
 
     private IDtrBarEntry EnsureOwnHeightEntry(string text) {

@@ -4,6 +4,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 #if DEBUG
 using Dalamud.Game.ClientState.Objects.Types;
+using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 #endif
 
@@ -88,6 +89,7 @@ public sealed class ConfigWindow : Window {
 #if DEBUG
         ImGui.Separator();
         DrawLocalReadout();
+        DrawTargetReadout();
 #endif
 
         if (ImGui.CollapsingHeader("Changelog"))
@@ -141,5 +143,79 @@ public sealed class ConfigWindow : Window {
         ImGui.Text($"Game CalculateHeight: {sample.GameUnits:0.000}");
         ImGui.TextDisabled("CalculateHeight is the game's own float, not meters. Use it to check the scales above.");
     }
+
+    private unsafe void DrawTargetReadout() {
+        ImGui.Separator();
+        ImGui.Text("Target");
+        var target = Service.Targets.Target;
+        if (target == null) {
+            ImGui.TextDisabled("Target someone to read their skeleton.");
+            return;
+        }
+
+        var gameObject = (GameObject*)target.Address;
+        if (gameObject == null || !gameObject->IsCharacter()) {
+            ImGui.TextDisabled("Target is not a character.");
+            return;
+        }
+
+        var character = (Character*)gameObject;
+        var customize = character->DrawData.CustomizeData;
+        var body = HeightCalculator.ResolveBody(gameObject);
+        var isYoung = body.Young || customize.BodyType == 4;
+        var model = body.RaceSexId != 0 ? $"c{body.RaceSexId:D4}" : "none";
+        ImGui.Text(target.Name.TextValue);
+        ImGui.Text($"Body {customize.BodyType}  height byte {customize.Height}");
+        ImGui.Text($"Race {body.Race} (data {customize.Race})  clan {body.Clan} (data tribe {customize.Tribe})  sex {body.Sex} (data {customize.Sex})");
+        ImGui.Text($"Model: {model}  {(isYoung ? "young" : "adult")}");
+        if (!HeightCalculator.TryMeasure(gameObject, config, out var sample)) {
+            ImGui.TextDisabled("No playable race height on the target.");
+            return;
+        }
+
+        var hasSkeleton = HeightCalculator.TrySkeletonScale(gameObject->DrawObject, out var scale);
+        var skeletonScale = hasSkeleton ? $"{scale.X:0.000}, {scale.Y:0.000}, {scale.Z:0.000}" : "none";
+        var hasRestHead = HeightCalculator.TryRestHead(gameObject, out var head);
+        var restHead = hasRestHead ? $"{head:0.000}" : "none";
+        float youngCm = 0f, usedBase = 0f, usedHead = 0f;
+        var usedSource = AdultHeadSource.None;
+        var youngMeasured = isYoung && hasSkeleton && hasRestHead
+            && HeightCalculator.TryYoungCentimeters(
+                body, head, scale.Y,
+                out youngCm, out usedBase, out usedHead, out usedSource);
+        var baseCm = youngMeasured
+            ? $"{usedBase:0.0} cm"
+            : HeightCalculator.TryBaseCentimeters(body, out var ownBase)
+                ? $"{ownBase:0.0} cm"
+                : "none";
+        var adultHead = youngMeasured
+            ? $"{usedHead:0.000} ({AdultHeadSourceLabel(usedSource)})"
+            : HeightCalculator.TryResolveAdultHead(body, out var resolvedHead, out var source)
+                ? $"{resolvedHead:0.000} ({AdultHeadSourceLabel(source)})"
+                : "none";
+        var young = youngMeasured ? $"{youngCm:0.00} cm" : "none";
+
+        ImGui.Text($"Creator: {sample.CreatorCentimeters:0.0} cm    Shown: {sample.ShownCentimeters:0.00} cm");
+        ImGui.Text($"Model scale: {sample.ModelScale:0.000}    Racial factor: {sample.RacialScale:0.000}    Custom scale: {sample.CustomScale:0.000}");
+        ImGui.Text($"Skeleton scale: {skeletonScale}");
+        ImGui.Text($"Nameplate: {character->Height:0.000}    CalculateHeight: {sample.GameUnits:0.000}");
+        ImGui.Text($"Rest head: {restHead}    Adult head: {adultHead}");
+        ImGui.Text($"Base: {baseCm}    Young result: {young}");
+        if (!isYoung && customize.BodyType == 1 && hasRestHead) {
+            var tableLine = $"Table: race {body.Race} sex {body.Sex} clan {body.Clan} head {head:0.000} model {model}";
+            ImGui.Text(tableLine);
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Copy##AdultHeadTableLine"))
+                ImGui.SetClipboardText(tableLine);
+        }
+    }
+
+    private static string AdultHeadSourceLabel(AdultHeadSource source) => source switch {
+        AdultHeadSource.Cache => "cache",
+        AdultHeadSource.Table => "table",
+        AdultHeadSource.OtherSexCache => "other sex, cache",
+        AdultHeadSource.OtherSexTable => "other sex, table",
+        _ => "none",
+    };
 #endif
 }
