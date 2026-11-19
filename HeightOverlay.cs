@@ -23,6 +23,7 @@ public sealed unsafe class HeightOverlay : IDisposable {
     private const float RestSeconds = 1.05f;
     private const string OwnHeightTitle = "Character height";
     private const float OwnFlashPop = 0.2f;
+    private const float OwnFlashLift = 4f;
     private static readonly string[] TargetAddonNames = ["_TargetInfoMainTarget", "_TargetInfo"];
 
     private readonly Configuration config;
@@ -219,6 +220,13 @@ public sealed unsafe class HeightOverlay : IDisposable {
         if (!HeightCalculator.TryMeasure((GameObject*)actor.Address, config, out var sample)) return false;
         centimeters = sample.ShownCentimeters;
         label = HeightCalculator.Format(centimeters, config.Unit, config.Decimals, config.CondenseHugeSizes);
+        if (config.IncludeHeelOffset
+            && HeightCalculator.TryHeelOffset((GameObject*)actor.Address, out var heel)) {
+            centimeters += heel;
+            label = HeightCalculator.Format(centimeters, config.Unit, config.Decimals, config.CondenseHugeSizes)
+                + " (" + HeightCalculator.FormatOffset(heel, centimeters, config.Unit, config.Decimals, config.CondenseHugeSizes) + ")";
+        }
+
         return true;
     }
 
@@ -311,7 +319,7 @@ public sealed unsafe class HeightOverlay : IDisposable {
         var textSize = Measure(font, idlePx * pop, ownLabel);
         var restingPos = new Vector2(
             AlignedTextX(textNode, bounds.Min.X, bounds.Max.X, idleSize.X),
-            bounds.Min.Y + (box.Y - idleSize.Y) * 0.5f);
+            bounds.Min.Y + (box.Y - idleSize.Y) * 0.5f - OwnFlashLift);
         var pos = restingPos + idleSize * 0.5f - textSize * 0.5f;
         var color = FlashColor(ownFlash.Direction);
         var thickness = MathF.Max(1f, MathF.Round(idlePx * pop / 16f));

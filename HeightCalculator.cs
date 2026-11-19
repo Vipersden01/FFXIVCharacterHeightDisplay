@@ -100,6 +100,47 @@ public static unsafe class HeightCalculator {
         return $"{feet}'{FormatNumber(inches, decimals)}\"";
     }
 
+    public static string FormatOffset(float centimeters, float totalCentimeters, HeightUnit unit, int decimals, bool auto) {
+        var sign = centimeters < 0f ? "-" : "+";
+        var abs = MathF.Abs(centimeters);
+        if (ShowsFeet(unit, auto)) {
+            if (abs / 2.54f < 12f)
+                return sign + FormatNumber(abs / 2.54f, decimals) + " in";
+            return sign + FormatFeet(abs, decimals);
+        }
+
+        var suffix = auto ? MetricSuffix(totalCentimeters) : UnitSuffix(unit);
+        var scaled = suffix switch {
+            "mm" => abs * 10f,
+            "m" => abs / 100f,
+            "km" => abs / 100_000f,
+            "µm" => abs * 10_000f,
+            "mi" => abs / 2.54f / (5280f * 12f),
+            _ => abs,
+        };
+        return sign + FormatNumber(scaled, decimals) + " " + suffix;
+    }
+
+    private static bool ShowsFeet(HeightUnit unit, bool auto) =>
+        unit == HeightUnit.FeetInches || (auto && IsImperial(unit));
+
+    private static string MetricSuffix(float centimeters) {
+        var abs = MathF.Abs(centimeters);
+        if (abs > 100_000f) return "km";
+        if (abs > 1_000f) return "m";
+        if (abs < 0.1f) return "µm";
+        if (abs < 10f) return "mm";
+        return "cm";
+    }
+
+    private static string UnitSuffix(HeightUnit unit) => unit switch {
+        HeightUnit.Millimeters => "mm",
+        HeightUnit.Meters => "m",
+        HeightUnit.Kilometers => "km",
+        HeightUnit.Miles => "mi",
+        _ => "cm",
+    };
+
     public static bool TryMeasure(GameObject* gameObject, Configuration config, out HeightSample sample) {
         sample = default;
         if (gameObject == null || !gameObject->IsCharacter()) return false;
@@ -107,13 +148,14 @@ public static unsafe class HeightCalculator {
         var character = (Character*)gameObject;
         var customize = character->DrawData.CustomizeData;
         var body = ResolveBody(gameObject);
-        if (!HeightTable.TryCreatorCentimeters(body.Race, body.Tribe, body.Sex, customize.Height, out var creatorCm))
+        var height = EffectiveHeight(gameObject);
+        if (!HeightTable.TryCreatorCentimeters(body.Race, body.Tribe, body.Sex, height, out var creatorCm))
             return false;
 
         TryReadScales(gameObject->DrawObject, out var modelScale, out var customScale);
         var local = Service.Objects.LocalPlayer;
         var isLocal = local != null && local.Address == (nint)gameObject;
-        var racial = RacialFactor(modelScale, VanillaSkeletonScale(body.Race, body.Tribe, body.Sex, customize.Height), isLocal);
+        var racial = RacialFactor(modelScale, VanillaSkeletonScale(body.Race, body.Tribe, body.Sex, height), isLocal);
         var custom = CustomExtra(customScale);
         var stature = creatorCm * racial;
         var gameUnits = character->ModelContainer.CalculateHeight();
@@ -172,6 +214,71 @@ public static unsafe class HeightCalculator {
         return new BodyIdentity(customize.Race, customize.Tribe, customize.Sex, customize.BodyType == 4, 0);
     }
 
+    public readonly record struct HeelLift(float Units, bool Counted, string Note);
+
+    // SimpleHeels writes its lift into DrawOffset. One game unit is one meter.
+    public static bool TryHeelOffset(GameObject* gameObject, out float centimeters) {
+        centimeters = 0f;
+        if (!TryHeelLift(gameObject, out var lift) || !lift.Counted) return false;
+        centimeters = lift.Units * 100f;
+        return float.IsFinite(centimeters);
+    }
+
+    public static bool TryHeelLift(GameObject* gameObject, out HeelLift lift) {
+        lift = default;
+        if (gameObject == null || !gameObject->IsCharacter()) return false;
+        var units = gameObject->DrawOffset.Y;
+        if (!float.IsFinite(units)) return false;
+
+        var character = (Character*)gameObject;
+        var id = gameObject->EntityId;
+        if (!IsStanding(character, out var skip)) {
+            if (skip == "emote" && standingHeels.TryGetValue(id, out var held) && MathF.Abs(held) >= 0.05f) {
+                lift = new HeelLift(held / 100f, true, "standing");
+                return true;
+            }
+
+            lift = new HeelLift(units, false, skip);
+            return true;
+        }
+
+        var centimeters = units * 100f;
+        if (id != 0)
+            standingHeels[id] = MathF.Abs(centimeters) < 0.05f ? 0f : centimeters;
+        if (MathF.Abs(centimeters) < 0.05f) {
+            lift = new HeelLift(units, false, "none");
+            return true;
+        }
+
+        lift = new HeelLift(units, true, "counted");
+        return true;
+    }
+
+    private static readonly Dictionary<uint, float> standingHeels = new();
+
+    private static bool IsStanding(Character* character, out string skip) {
+        switch (character->Mode) {
+            case CharacterModes.EmoteLoop:
+                skip = "emote";
+                return false;
+            case CharacterModes.InPositionLoop:
+                skip = "sitting";
+                return false;
+            case CharacterModes.Mounted:
+            case CharacterModes.RidingPillion:
+                skip = "mounted";
+                return false;
+        }
+
+        if (character->MoveController.IsSwimming || character->MoveController.IsFlying()) {
+            skip = character->MoveController.IsFlying() ? "flying" : "swimming";
+            return false;
+        }
+
+        skip = "";
+        return true;
+    }
+
     public static bool TryReadScales(DrawObject* drawObject, out float modelScale, out float customScale) {
         modelScale = 1f;
         customScale = 1f;
@@ -208,6 +315,29 @@ public static unsafe class HeightCalculator {
         0.984f, 1.066f, 1.111f, 1.189f,
         0.984f, 1.066f, 1.111f, 1.189f,
     ];
+
+    // A byte above 100 is unset NPC data. The live body scale is the slider those characters actually use.
+    public static byte EffectiveHeight(GameObject* gameObject) {
+        var customize = ((Character*)gameObject)->DrawData.CustomizeData;
+        var body = ResolveBody(gameObject);
+        if (body.Young || customize.BodyType == 4 || customize.Height <= 100) return customize.Height;
+
+        TryReadScales(gameObject->DrawObject, out var modelScale, out _);
+        var scale = modelScale;
+        if (TrySkeletonScale(gameObject->DrawObject, out var skeleton)
+            && float.IsFinite(skeleton.Y) && skeleton.Y > 0.0001f)
+            scale = skeleton.Y;
+        return SliderFromScale(body, scale);
+    }
+
+    private static byte SliderFromScale(BodyIdentity body, float scale) {
+        var min = VanillaSkeletonScale(body.Race, body.Tribe, body.Sex, 0);
+        var max = VanillaSkeletonScale(body.Race, body.Tribe, body.Sex, 100);
+        var span = max - min;
+        if (!float.IsFinite(scale) || !float.IsFinite(span) || span <= 0.0001f) return 0;
+        var slider = Math.Clamp((scale - min) / span, 0f, 1f);
+        return (byte)Math.Clamp((int)MathF.Round(slider * 100f), 0, 100);
+    }
 
     private static float VanillaSkeletonScale(byte race, byte tribe, byte sex, byte height) {
         if (race is < 1 or > 8) return 1f;

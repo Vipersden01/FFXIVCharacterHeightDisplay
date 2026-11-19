@@ -80,6 +80,9 @@ public sealed class ConfigWindow : Window {
         changed |= Checkbox("Flashy Height Text", config.FlashChanges, value => config.FlashChanges = value);
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Special text effects when increasing / decreasing size");
+        changed |= Checkbox("Include heel offset", config.IncludeHeelOffset, value => config.IncludeHeelOffset = value);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Adds SimpleHeels height while standing.");
         changed |= Checkbox("World Bar Height Display", config.ShowOwnOnWorldBar, value => config.ShowOwnOnWorldBar = value);
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Shows your height on the server info bar and hides it on your party row.");
@@ -165,7 +168,10 @@ public sealed class ConfigWindow : Window {
         var isYoung = body.Young || customize.BodyType == 4;
         var model = body.RaceSexId != 0 ? $"c{body.RaceSexId:D4}" : "none";
         ImGui.Text(target.Name.TextValue);
-        ImGui.Text($"Body {customize.BodyType}  height byte {customize.Height}");
+        var heightByte = customize.Height > 100 && !isYoung
+            ? $"height byte {customize.Height} (slider {HeightCalculator.EffectiveHeight(gameObject)})"
+            : $"height byte {customize.Height}";
+        ImGui.Text($"Body {customize.BodyType}  {heightByte}");
         ImGui.Text($"Race {body.Race} (data {customize.Race})  clan {body.Clan} (data tribe {customize.Tribe})  sex {body.Sex} (data {customize.Sex})");
         ImGui.Text($"Model: {model}  {(isYoung ? "young" : "adult")}");
         if (!HeightCalculator.TryMeasure(gameObject, config, out var sample)) {
@@ -201,6 +207,7 @@ public sealed class ConfigWindow : Window {
         ImGui.Text($"Nameplate: {character->Height:0.000}    CalculateHeight: {sample.GameUnits:0.000}");
         ImGui.Text($"Rest head: {restHead}    Adult head: {adultHead}");
         ImGui.Text($"Base: {baseCm}    Young result: {young}");
+        ImGui.Text(HeelOffsetLine(gameObject));
         if (!isYoung && customize.BodyType == 1 && hasRestHead) {
             var tableLine = $"Table: race {body.Race} sex {body.Sex} clan {body.Clan} head {head:0.000} model {model}";
             ImGui.Text(tableLine);
@@ -208,6 +215,13 @@ public sealed class ConfigWindow : Window {
             if (ImGui.SmallButton("Copy##AdultHeadTableLine"))
                 ImGui.SetClipboardText(tableLine);
         }
+    }
+
+    private static unsafe string HeelOffsetLine(GameObject* gameObject) {
+        if (!HeightCalculator.TryHeelLift(gameObject, out var lift)) return "Heel offset: none";
+        if (lift.Note == "none") return "Heel offset: none";
+        var state = lift.Note == "standing" ? "counted, last standing" : lift.Counted ? "counted" : "skipped: " + lift.Note;
+        return $"Heel offset: {lift.Units:0.000} units ({lift.Units * 100f:0.0} cm, {state})";
     }
 
     private static string AdultHeadSourceLabel(AdultHeadSource source) => source switch {

@@ -52,6 +52,11 @@ public sealed class Configuration : IPluginConfiguration {
     public bool FlashChanges { get; set; }
 
     /// <summary>
+    /// Adds the SimpleHeels lift to the shown height while the character is standing.
+    /// </summary>
+    public bool IncludeHeelOffset { get; set; }
+
+    /// <summary>
     /// Shows the local player's height on the server info bar and hides it on their party row.
     /// </summary>
     public bool ShowOwnOnWorldBar { get; set; }
