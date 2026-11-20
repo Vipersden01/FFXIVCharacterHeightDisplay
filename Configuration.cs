@@ -9,6 +9,8 @@ public enum HeightUnit {
     Millimeters,
     Kilometers,
     Miles,
+    Megametres,
+    AstronomicalUnits,
 }
 
 public enum PartyLabelSide {

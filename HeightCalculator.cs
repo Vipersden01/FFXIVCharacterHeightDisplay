@@ -45,32 +45,50 @@ public static unsafe class HeightCalculator {
             HeightUnit.Millimeters => FormatNumber(centimeters * 10f, decimals) + " mm",
             HeightUnit.Meters => FormatNumber(centimeters / 100f, decimals) + " m",
             HeightUnit.Kilometers => FormatNumber(centimeters / 100_000f, decimals) + " km",
+            HeightUnit.Megametres => FormatMegametres(centimeters, decimals),
+            HeightUnit.AstronomicalUnits => FormatAu(centimeters, decimals),
             HeightUnit.FeetInches => FormatFeet(centimeters, decimals),
             HeightUnit.Miles => FormatNumber(centimeters / 2.54f / (5280f * 12f), decimals) + " mi",
             _ => FormatNumber(centimeters, decimals) + " cm",
         };
     }
 
+    private const double CentimetersPerMegametre = 100_000_000d;
+    private const double CentimetersPerAu = 14_959_787_070_000d;
+    private const double MetricMegametreCentimeters = 1_000_000_000d;
+    private const double MetricAuCentimeters = 1650d * CentimetersPerMegametre;
+    private const double ImperialAuCentimeters = 1_000_000d * 5280d * 12d * 2.54d;
+
     private static bool IsImperial(HeightUnit unit) => unit is HeightUnit.FeetInches or HeightUnit.Miles;
 
     private static string FormatMetric(float centimeters, int decimals) {
-        var abs = MathF.Abs(centimeters);
-        if (abs > 100_000f) return FormatNumber(centimeters / 100_000f, decimals) + " km";
-        if (abs > 1_000f) return FormatNumber(centimeters / 100f, decimals) + " m";
-        if (abs < 0.1f) return FormatNumber(centimeters * 10_000f, decimals) + " µm";
-        if (abs < 10f) return FormatNumber(centimeters * 10f, decimals) + " mm";
+        var abs = Math.Abs((double)centimeters);
+        if (abs >= MetricAuCentimeters) return FormatAu(centimeters, decimals);
+        if (abs >= MetricMegametreCentimeters) return FormatMegametres(centimeters, decimals);
+        if (abs > 100_000d) return FormatNumber(centimeters / 100_000f, decimals) + " km";
+        if (abs > 1_000d) return FormatNumber(centimeters / 100f, decimals) + " m";
+        if (abs < 0.1d) return FormatNumber(centimeters * 10_000f, decimals) + " µm";
+        if (abs < 10d) return FormatNumber(centimeters * 10f, decimals) + " mm";
         return FormatNumber(centimeters, decimals) + " cm";
     }
 
     private static string FormatImperial(float centimeters, int decimals) {
+        var abs = Math.Abs((double)centimeters);
+        if (abs >= ImperialAuCentimeters) return FormatAu(centimeters, decimals);
         var inches = centimeters / 2.54f;
-        var abs = MathF.Abs(inches);
-        if (abs >= 5280f * 12f)
+        var absInches = MathF.Abs(inches);
+        if (absInches >= 5280f * 12f)
             return FormatNumber(inches / (5280f * 12f), decimals) + " mi";
-        if (abs < 12f)
+        if (absInches < 12f)
             return FormatNumber(inches, decimals) + " in";
         return FormatFeet(centimeters, decimals);
     }
+
+    private static string FormatMegametres(float centimeters, int decimals) =>
+        FormatNumber((float)(centimeters / CentimetersPerMegametre), decimals) + " Mm";
+
+    private static string FormatAu(float centimeters, int decimals) =>
+        FormatNumber((float)(centimeters / CentimetersPerAu), decimals) + " AU";
 
     public static string FormatNumber(float value, int decimals) {
         decimals = Math.Clamp(decimals, 0, 3);
@@ -114,6 +132,8 @@ public static unsafe class HeightCalculator {
             "mm" => abs * 10f,
             "m" => abs / 100f,
             "km" => abs / 100_000f,
+            "Mm" => (float)(abs / CentimetersPerMegametre),
+            "AU" => (float)(abs / CentimetersPerAu),
             "µm" => abs * 10_000f,
             "mi" => abs / 2.54f / (5280f * 12f),
             _ => abs,
@@ -125,11 +145,13 @@ public static unsafe class HeightCalculator {
         unit == HeightUnit.FeetInches || (auto && IsImperial(unit));
 
     private static string MetricSuffix(float centimeters) {
-        var abs = MathF.Abs(centimeters);
-        if (abs > 100_000f) return "km";
-        if (abs > 1_000f) return "m";
-        if (abs < 0.1f) return "µm";
-        if (abs < 10f) return "mm";
+        var abs = Math.Abs((double)centimeters);
+        if (abs >= MetricAuCentimeters) return "AU";
+        if (abs >= MetricMegametreCentimeters) return "Mm";
+        if (abs > 100_000d) return "km";
+        if (abs > 1_000d) return "m";
+        if (abs < 0.1d) return "µm";
+        if (abs < 10d) return "mm";
         return "cm";
     }
 
@@ -137,6 +159,8 @@ public static unsafe class HeightCalculator {
         HeightUnit.Millimeters => "mm",
         HeightUnit.Meters => "m",
         HeightUnit.Kilometers => "km",
+        HeightUnit.Megametres => "Mm",
+        HeightUnit.AstronomicalUnits => "AU",
         HeightUnit.Miles => "mi",
         _ => "cm",
     };

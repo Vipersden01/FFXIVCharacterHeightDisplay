@@ -41,7 +41,7 @@ public sealed class ConfigWindow : Window {
             }
         } else {
             var unit = UnitIndex(config.Unit);
-            if (ImGui.Combo("Unit", ref unit, "Millimeters\0Centimeters\0Meters\0Kilometers\0Feet / inches\0Miles\0")) {
+            if (ImGui.Combo("Unit", ref unit, "Millimeters\0Centimeters\0Meters\0Kilometers\0Megametres\0Astronomical units\0Feet / inches\0Miles\0")) {
                 config.Unit = UnitFromIndex(unit);
                 changed = true;
             }
@@ -49,7 +49,7 @@ public sealed class ConfigWindow : Window {
 
         changed |= Checkbox("Auto unit conversion", config.CondenseHugeSizes, value => config.CondenseHugeSizes = value);
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Metric steps through mm, cm, m, and km. Imperial steps through inches, feet, and miles.");
+            ImGui.SetTooltip("Metric steps through mm, cm, m, km, Mm, and AU. Imperial steps through inches, feet, miles, and AU.");
 
         var decimals = config.Decimals;
         if (ImGui.SliderInt("Decimals", ref decimals, 0, 3)) {
@@ -114,8 +114,10 @@ public sealed class ConfigWindow : Window {
         HeightUnit.Centimeters => 1,
         HeightUnit.Meters => 2,
         HeightUnit.Kilometers => 3,
-        HeightUnit.FeetInches => 4,
-        _ => 5,
+        HeightUnit.Megametres => 4,
+        HeightUnit.AstronomicalUnits => 5,
+        HeightUnit.FeetInches => 6,
+        _ => 7,
     };
 
     private static HeightUnit UnitFromIndex(int index) => index switch {
@@ -123,7 +125,9 @@ public sealed class ConfigWindow : Window {
         1 => HeightUnit.Centimeters,
         2 => HeightUnit.Meters,
         3 => HeightUnit.Kilometers,
-        4 => HeightUnit.FeetInches,
+        4 => HeightUnit.Megametres,
+        5 => HeightUnit.AstronomicalUnits,
+        6 => HeightUnit.FeetInches,
         _ => HeightUnit.Miles,
     };
 
