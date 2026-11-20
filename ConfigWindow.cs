@@ -103,7 +103,7 @@ public sealed class ConfigWindow : Window {
 #endif
 
         if (ImGui.CollapsingHeader("Changelog"))
-            ImGui.TextWrapped("1.2.4: Young (child) bodies are now measured from their skeleton, fixed server bar offset, added heels toggle for displaying height with them, and fixed some edge cases where unset NPC's would use incorrect values.");
+            ImGui.TextWrapped("1.2.5:\n- Fixed World Bar display on higher resolution monitors\n- Added clickable World Bar to open configuration\n- Fixed a few minor decimal rounding issues\n- Added new forms of extreme measurement, with auto-conversion support");
 
         if (changed)
             config.Save();
