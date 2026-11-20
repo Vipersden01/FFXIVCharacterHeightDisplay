@@ -12,9 +12,15 @@ namespace CharacterHeight;
 
 public sealed class ConfigWindow : Window {
     private readonly Configuration config;
+#if DEBUG
+    private readonly HeightOverlay overlay;
+#endif
 
-    public ConfigWindow(Configuration config) : base("Height Display###HeightDisplayConfig") {
+    public ConfigWindow(Configuration config, HeightOverlay overlay) : base("Height Display###HeightDisplayConfig") {
         this.config = config;
+#if DEBUG
+        this.overlay = overlay;
+#endif
         RespectCloseHotkey = true;
         SizeCondition = ImGuiCond.FirstUseEver;
         Size = new Vector2(460, 420);
@@ -93,6 +99,7 @@ public sealed class ConfigWindow : Window {
         ImGui.Separator();
         DrawLocalReadout();
         DrawTargetReadout();
+        ImGui.Text(overlay.ServerBarDebug);
 #endif
 
         if (ImGui.CollapsingHeader("Changelog"))

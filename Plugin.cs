@@ -19,10 +19,10 @@ public sealed class Plugin : IDalamudPlugin {
         ApplyCutsceneVisibility();
 
         axisFont = pluginInterface.UiBuilder.FontAtlas.NewGameFontHandle(new GameFontStyle(GameFontFamily.Axis, 18f));
-        overlay = new HeightOverlay(config, axisFont);
+        overlay = new HeightOverlay(config, axisFont, ToggleConfig);
 
         windows = new WindowSystem("CharacterHeight");
-        configWindow = new ConfigWindow(config);
+        configWindow = new ConfigWindow(config, overlay);
         windows.AddWindow(configWindow);
 
         pluginInterface.UiBuilder.Draw += OnDraw;

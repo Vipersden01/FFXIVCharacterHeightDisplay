@@ -24,20 +24,28 @@ public sealed unsafe class HeightOverlay : IDisposable {
     private const string OwnHeightTitle = "Character height";
     private const float OwnFlashPop = 0.2f;
     private const float OwnFlashLift = 4f;
+    // The server bar's text draws 19 px tall at standard UI.
+    private const float OwnBarDrawnHeight = 19f;
     private static readonly string[] TargetAddonNames = ["_TargetInfoMainTarget", "_TargetInfo"];
 
     private readonly Configuration config;
     private readonly IFontHandle axisFont;
     private readonly Dictionary<string, HeightMemory> heights = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, string> castRowNames = new();
+    private readonly Action openConfig;
     private IDtrBarEntry? ownHeightEntry;
     private string ownLabel = string.Empty;
     private ActiveFlash ownFlash;
     private float ownBarPx;
+    private Vector2 ownDrawnSize;
+#if DEBUG
+    public string ServerBarDebug { get; private set; } = "Server bar: hidden";
+#endif
 
-    public HeightOverlay(Configuration config, IFontHandle axisFont) {
+    public HeightOverlay(Configuration config, IFontHandle axisFont, Action openConfig) {
         this.config = config;
         this.axisFont = axisFont;
+        this.openConfig = openConfig;
     }
 
     public void Dispose() {
@@ -287,44 +295,81 @@ public sealed unsafe class HeightOverlay : IDisposable {
     }
 
     private void DrawOwnHeightFlash(ImFontPtr font) {
-        if (ownHeightEntry == null || !ownHeightEntry.Shown || string.IsNullOrEmpty(ownLabel)) return;
+        if (ownHeightEntry == null || !ownHeightEntry.Shown || string.IsNullOrEmpty(ownLabel)) {
+            NoteServerBar("Server bar: hidden");
+            return;
+        }
 
         var bounds = ownHeightEntry.ScreenBounds;
-        var box = bounds.Max - bounds.Min;
-        // The server bar text ignores the label text size setting, so the stand-in follows the bar's own font.
+        var gameBox = bounds.Max - bounds.Min;
+        var screenScale = OverlayScale(out var origin);
+        // ScreenBounds adds the node's local width, which skips the high-resolution UI scale.
+        var barScale = DtrBarScale();
         Bounds nodeBounds = default;
-        var textNode = box.X >= 2f && box.Y >= 2f ? FindDtrTextNode(bounds.Min, bounds.Max, out nodeBounds) : null;
+        var matchError = float.PositiveInfinity;
+        var textNode = gameBox.X >= 2f && gameBox.Y >= 2f
+            ? FindDtrTextNode(bounds.Min, bounds.Max, out nodeBounds, out matchError)
+            : null;
+        if (textNode != null && textNode->Width > 0 && nodeBounds.Width > 0)
+            barScale = nodeBounds.Width / textNode->Width;
+        if (!float.IsFinite(barScale) || barScale <= 0.01f) barScale = 1f;
+        var slotMin = textNode != null ? new Vector2(nodeBounds.Pos1.X, nodeBounds.Pos1.Y) : bounds.Min;
+        var slotMax = textNode != null
+            ? new Vector2(nodeBounds.Pos2.X, nodeBounds.Pos2.Y)
+            : bounds.Min + gameBox * barScale;
+        var slotBox = slotMax - slotMin;
+        // The server bar text ignores the label text size setting, so the stand-in follows the bar's own font.
         var guessPx = textNode != null
             ? FontPixels((AtkResNode*)textNode, nodeBounds)
-            : box.Y >= 8f ? Math.Clamp(box.Y * 0.92f, 12f, 28f) : 16f;
+            : slotBox.Y >= 8f ? Math.Clamp(slotBox.Y * 0.92f, 12f, 48f) : 16f;
         // The game font draws wider than ours at the same size, so match the width the bar actually drew.
         if (textNode != null && !ownFlash.Active) {
             var guessWidth = Measure(font, guessPx, ownLabel).X;
             var matched = guessWidth > 1f ? guessPx * DrawnNameWidth((AtkResNode*)textNode, nodeBounds) / guessWidth : 0f;
             if (float.IsFinite(matched) && matched is >= 8f and <= 64f)
                 ownBarPx = matched;
+            // The bar text is blank spaces during a flash, so keep the last size it drew with the label.
+            if (TryDrawnTextSize(textNode, nodeBounds, out var drawn))
+                ownDrawnSize = drawn;
         }
 
         var idlePx = ownBarPx > 0f ? ownBarPx : guessPx;
-        var idleSize = Measure(font, idlePx, ownLabel);
-        var reserve = config.FlashChanges ? idlePx * 0.6f + idleSize.X * OwnFlashPop * 0.5f : 0f;
-        ownHeightEntry.MinimumWidth = (ushort)Math.Clamp((int)MathF.Ceiling(idleSize.X + reserve), 1, 400);
-        if (!ownFlash.Active || box.X < 2f || box.Y < 2f) return;
+        var gameIdle = Measure(font, idlePx, ownLabel);
+        var reserve = config.FlashChanges ? idlePx * 0.6f + gameIdle.X * OwnFlashPop * 0.5f : 0f;
+        var requested = (gameIdle.X + reserve) / barScale;
+        ownHeightEntry.MinimumWidth = (ushort)Math.Clamp((int)MathF.Ceiling(requested), 1, 400);
+        var drawnWidth = textNode != null ? DrawnNameWidth((AtkResNode*)textNode, nodeBounds) : gameIdle.X;
+        var alignment = textNode != null ? textNode->AlignmentType.ToString() : "right";
+        var errorText = float.IsFinite(matchError) ? $"{matchError:0.0}" : "none";
+        var measured = textNode != null && ownDrawnSize.Y >= 4f;
+        var center = slotMin.Y + slotBox.Y * 0.5f;
+        // The drawn box carries line spacing above the letters, so center on the slot and grow the raise with the drawn height.
+        var textScale = measured ? ownDrawnSize.Y / OwnBarDrawnHeight : barScale;
+        var lift = OwnFlashLift * textScale;
+        var restingTop = center - gameIdle.Y * 0.5f - lift;
+        var drawnText = measured ? $"{ownDrawnSize.X:0}x{ownDrawnSize.Y:0}" : "none";
+        NoteServerBar(
+            $"Server bar: box {slotMin.X:0}..{slotMax.X:0}  node {(textNode != null ? "found" : "none")} ({errorText}, {alignment})  drawn width {drawnWidth:0}  drawn {drawnText}  text {gameIdle.Y:0.0}  center {center:0.0}  lift {lift:0.0}  bar scale {barScale:0.00}  screen scale {screenScale.X:0.000}, {screenScale.Y:0.000}");
+        if (!ownFlash.Active || gameBox.X < 2f || gameBox.Y < 2f) return;
 
+        var min = origin + slotMin * screenScale;
+        var max = origin + slotMax * screenScale;
+        var drawPx = idlePx * screenScale.Y;
+        var idleSize = Measure(font, drawPx, ownLabel);
         // Let the plain text show through as the glow fades out.
         var handoff = ownFlash.Fade < 0.4f;
         ownHeightEntry.Text = handoff ? ownLabel : new string(' ', Math.Max(ownLabel.Length, 1));
         var presence = handoff ? ownFlash.Fade / 0.4f : 1f;
         var pop = 1f + OwnFlashPop * ownFlash.Fade;
-        var textSize = Measure(font, idlePx * pop, ownLabel);
+        var textSize = Measure(font, drawPx * pop, ownLabel);
         var restingPos = new Vector2(
-            AlignedTextX(textNode, bounds.Min.X, bounds.Max.X, idleSize.X),
-            bounds.Min.Y + (box.Y - idleSize.Y) * 0.5f - OwnFlashLift);
+            AlignedTextX(textNode, min.X, max.X, idleSize.X),
+            origin.Y + restingTop * screenScale.Y);
         var pos = restingPos + idleSize * 0.5f - textSize * 0.5f;
         var color = FlashColor(ownFlash.Direction);
-        var thickness = MathF.Max(1f, MathF.Round(idlePx * pop / 16f));
-        var arrowHeight = MathF.Max(6f, idlePx * pop * 0.42f);
-        var arrowReach = arrowHeight * 0.85f + MathF.Max(2f, idlePx * pop * 0.14f);
+        var thickness = MathF.Max(1f, MathF.Round(drawPx * pop / 16f));
+        var arrowHeight = MathF.Max(6f, drawPx * pop * 0.42f);
+        var arrowReach = arrowHeight * 0.85f + MathF.Max(2f, drawPx * pop * 0.14f);
         if (GameWindowCovers(
             new Vector2(pos.X - thickness, pos.Y - thickness),
             new Vector2(pos.X + textSize.X + thickness + arrowReach, pos.Y + textSize.Y + thickness),
@@ -332,31 +377,60 @@ public sealed unsafe class HeightOverlay : IDisposable {
             return;
         var fill = WithAlpha(LerpColor(ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, 1f)), color, ownFlash.Fade), presence);
         var edge = WithAlpha(ImGui.ColorConvertFloat4ToU32(new Vector4(0f, 0f, 0f, 1f)), presence);
-        DrawGlow(font, idlePx * pop, pos, textSize, ownLabel, color, ownFlash.Fade * presence);
-        DrawOutlined(font, idlePx * pop, pos, MathF.Max(1f, MathF.Round(idlePx * pop / 16f)), fill, edge, ownLabel);
-        DrawChangeArrow(pos, textSize, idlePx * pop, false, ownFlash.Direction, color, ownFlash.Fade * presence);
+        DrawGlow(font, drawPx * pop, pos, textSize, ownLabel, color, ownFlash.Fade * presence);
+        DrawOutlined(font, drawPx * pop, pos, MathF.Max(1f, MathF.Round(drawPx * pop / 16f)), fill, edge, ownLabel);
+        DrawChangeArrow(pos, textSize, drawPx * pop, false, ownFlash.Direction, color, ownFlash.Fade * presence);
     }
 
-    private static AtkTextNode* FindDtrTextNode(Vector2 min, Vector2 max, out Bounds nodeBounds) {
+    // Game screen pixels to the overlay. Scale is 1 on a normal window, and grows where the render size and the overlay differ.
+    private static Vector2 OverlayScale(out Vector2 origin) {
+        var viewport = ImGui.GetMainViewport();
+        origin = viewport.Pos;
+        var device = FFXIVClientStructs.FFXIV.Client.Graphics.Kernel.Device.Instance();
+        if (device == null || device->Width <= 0 || device->Height <= 0) return Vector2.One;
+
+        var scale = viewport.Size / new Vector2(device->Width, device->Height);
+        if (!float.IsFinite(scale.X) || scale.X <= 0.01f) scale.X = 1f;
+        if (!float.IsFinite(scale.Y) || scale.Y <= 0.01f) scale.Y = 1f;
+        return scale;
+    }
+
+    // The high-resolution UI setting scales _DTR. ScreenBounds does not include it.
+    private static float DtrBarScale() {
+        var addon = Service.GameGui.GetAddonByName<AtkUnitBase>("_DTR");
+        if (addon == null) return 1f;
+        var scale = addon->Scale;
+        if (!float.IsFinite(scale) || scale <= 0.01f) return 1f;
+        return scale;
+    }
+
+    private void NoteServerBar(string line) {
+#if DEBUG
+        ServerBarDebug = line;
+#endif
+    }
+
+    private static AtkTextNode* FindDtrTextNode(Vector2 min, Vector2 max, out Bounds nodeBounds, out float error) {
         nodeBounds = default;
+        error = float.PositiveInfinity;
         var addon = Service.GameGui.GetAddonByName<AtkUnitBase>("_DTR");
         if (addon == null || !addon->IsVisible || addon->RootNode == null) return null;
 
         AtkTextNode* found = null;
-        var bestError = 2.5f;
-        VisitDtrText(addon->RootNode, min, max, ref found, ref nodeBounds, ref bestError);
+        var tolerance = MathF.Max(2.5f, MathF.Abs(max.Y - min.Y) * 0.15f);
+        var bestError = tolerance;
+        VisitDtrText(addon->RootNode, min, ref found, ref nodeBounds, ref bestError, ref error);
         return found;
     }
 
-    private static void VisitDtrText(AtkResNode* node, Vector2 min, Vector2 max, ref AtkTextNode* found, ref Bounds foundBounds, ref float bestError) {
+    private static void VisitDtrText(AtkResNode* node, Vector2 min, ref AtkTextNode* found, ref Bounds foundBounds, ref float bestError, ref float closest) {
         if (node == null || !node->IsVisible()) return;
 
         if (node->GetNodeType() == NodeType.Text) {
             Bounds bounds;
             node->GetBounds(&bounds);
-            var error = MathF.Max(
-                MathF.Max(MathF.Abs(bounds.Pos1.X - min.X), MathF.Abs(bounds.Pos2.X - max.X)),
-                MathF.Max(MathF.Abs(bounds.Pos1.Y - min.Y), MathF.Abs(bounds.Pos2.Y - max.Y)));
+            var error = MathF.Max(MathF.Abs(bounds.Pos1.X - min.X), MathF.Abs(bounds.Pos1.Y - min.Y));
+            if (error < closest) closest = error;
             if (error < bestError) {
                 found = node->GetAsAtkTextNode();
                 foundBounds = bounds;
@@ -370,16 +444,17 @@ public sealed unsafe class HeightOverlay : IDisposable {
                 var list = component->UldManager.NodeList;
                 var count = component->UldManager.NodeListCount;
                 for (var i = 0; i < count; i++)
-                    VisitDtrText(list[i], min, max, ref found, ref foundBounds, ref bestError);
+                    VisitDtrText(list[i], min, ref found, ref foundBounds, ref bestError, ref closest);
             }
         }
 
         for (var child = node->ChildNode; child != null; child = child->PrevSiblingNode)
-            VisitDtrText(child, min, max, ref found, ref foundBounds, ref bestError);
+            VisitDtrText(child, min, ref found, ref foundBounds, ref bestError, ref closest);
     }
 
     private static float AlignedTextX(AtkTextNode* textNode, float left, float right, float width) {
-        if (textNode == null) return left;
+        // The server bar draws its label from the right. A missed node used to pin the flash to the left edge.
+        if (textNode == null) return right - width;
         return textNode->AlignmentType switch {
             AlignmentType.Top or AlignmentType.Center or AlignmentType.Bottom => left + (right - left - width) * 0.5f,
             AlignmentType.TopRight or AlignmentType.Right or AlignmentType.BottomRight => right - width,
@@ -397,7 +472,8 @@ public sealed unsafe class HeightOverlay : IDisposable {
             ownHeightEntry = Service.DtrBar.Get(OwnHeightTitle, text);
         }
 
-        ownHeightEntry.Tooltip = "Your character height.";
+        ownHeightEntry.Tooltip = "Your character height. Click to open settings.";
+        ownHeightEntry.OnClick = _ => openConfig();
         return ownHeightEntry;
     }
 
@@ -409,6 +485,7 @@ public sealed unsafe class HeightOverlay : IDisposable {
     private void HideOwnHeightBar() {
         ownLabel = string.Empty;
         ownFlash = default;
+        NoteServerBar("Server bar: hidden");
         if (ownHeightEntry == null) return;
         ownHeightEntry.Shown = false;
     }
@@ -719,6 +796,21 @@ public sealed unsafe class HeightOverlay : IDisposable {
         var scale = localHeight > 0 && screenBounds.Height > 0 ? screenBounds.Height / (float)localHeight : 1f;
         if (!float.IsFinite(scale) || scale <= 0.1f) scale = 1f;
         return width * scale;
+    }
+
+    // The glyph box the game drew, in screen pixels. Its own scale flag skips the high-resolution UI scale on the parent.
+    private static bool TryDrawnTextSize(AtkTextNode* text, Bounds screenBounds, out Vector2 size) {
+        size = default;
+        if (text == null) return false;
+
+        ushort width = 0;
+        ushort height = 0;
+        text->GetTextDrawSize(&width, &height, considerScale: false);
+        var localHeight = text->AtkResNode.Height;
+        var scale = localHeight > 0 && screenBounds.Height > 0 ? screenBounds.Height / (float)localHeight : 1f;
+        if (!float.IsFinite(scale) || scale <= 0.1f) scale = 1f;
+        size = new Vector2(width, height) * scale;
+        return size.Y is >= 4f and <= 200f;
     }
 
     private static Vector2 Measure(ImFontPtr font, float fontPx, string text) {
